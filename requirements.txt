@@ -1,4 +1,9 @@
 # Core
+# NOTE: `pip install -r requirements.txt` alone installs the CPU-only build of
+# torch/torchvision. For local GPU training, install the CUDA build FIRST:
+#   pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
+# then run `pip install -r requirements.txt` — pip will see torch/torchvision
+# already satisfied and leave them alone.
 torch>=2.2
 torchvision>=0.17
 numpy
@@ -13,6 +18,9 @@ scikit-image
 
 # Explainability
 grad-cam
+
+# Metrics (quadratic weighted kappa, AUC)
+scikit-learn
 
 # App / viz
 streamlit

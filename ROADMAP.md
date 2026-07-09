@@ -5,7 +5,7 @@ AI-assisted retinal disease analysis pipeline. Educational/portfolio project —
 ## Ground rules
 
 - Build one vertical slice end-to-end before adding breadth. A working DR-only pipeline beats five half-built disease models.
-- Train on Colab or Kaggle notebooks (free GPU tiers). Don't try to fine-tune CNNs on a CPU.
+- Train on a GPU — Colab or Kaggle notebooks (free GPU tiers) if you don't have one locally, a local NVIDIA GPU via `src/detection/train.py` if you do. Don't try to fine-tune CNNs on a CPU.
 - Use Claude Code with Plan Mode (Shift+Tab) for anything touching more than 2-3 files. Sonnet for implementation, Opus for planning/architecture calls (`/model opusplan`).
 - Commit to git after every working milestone. `/clear` your Claude Code session between unrelated phases.
 - Every phase below ends with something you can run and look at — not just code that compiles.
@@ -41,9 +41,12 @@ Classical CV, no ML/GPU needed.
 
 ## Phase 3 — DR Detection (weeks 3-5)
 
-- Fine-tune a pretrained EfficientNet (or ConvNeXt) on APTOS labels (5-class DR severity) in Colab.
-- Track accuracy/AUC on a held-out validation split — don't skip this, it's your first real result.
-- Export the trained weights, load them in the local inference pipeline.
+- Fine-tune a pretrained EfficientNet-B0 on APTOS labels (5-class DR severity) —
+  locally on a GPU if you have one (`src/detection/train.py`), otherwise in Colab.
+- Track accuracy/AUC/quadratic weighted kappa on a held-out validation split during
+  training, then report the same on the untouched test split — don't skip this,
+  it's your first real result.
+- Load the trained weights in the local inference pipeline (`src/detection/infer.py`).
 - Output: probability + severity label (e.g., "Moderate NPDR, 94.2%").
 
 **Done when:** you can run inference on a new image locally and get a probability + severity out.
@@ -115,5 +118,9 @@ Classical CV, can run in parallel with Phase 3/4 training.
 
 ## Compute notes
 
-- Training: Colab (free T4 GPU tier, upgrade to Colab Pro if you need more hours) or Kaggle Notebooks (free GPU quota, resets weekly).
+- Training: a local NVIDIA GPU works well if you have one — install the CUDA
+  build of torch/torchvision (see `requirements.txt`) and run
+  `src/detection/train.py` directly. Without a local GPU, use Colab (free T4 tier,
+  upgrade to Colab Pro if you need more hours) or Kaggle Notebooks (free GPU quota,
+  resets weekly).
 - Inference/app: runs fine on CPU once models are trained — no GPU needed for the Streamlit demo.

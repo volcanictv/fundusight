@@ -4,7 +4,7 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 3 — DR Detection
+**Current phase:** Phase 4 — Explainability
 
 ## Tech stack
 
@@ -13,14 +13,14 @@ See ROADMAP.md for the full phased plan. Update the "Current phase" line below a
 - pytorch-grad-cam for explainability (Grad-CAM, EigenCAM, LayerCAM).
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
-- Training happens in Colab/Kaggle notebooks (GPU); inference and the app run locally on CPU.
+- Training happens locally on a local NVIDIA GPU via `src/detection/train.py` (CUDA-enabled torch — see `requirements.txt` for the install command); Colab/Kaggle notebooks are the fallback for anyone without a local GPU. Inference and the app run locally on CPU.
 
 ## Repo layout
 
 ```
 src/
   preprocessing/     quality assessment, CLAHE, illumination correction
-  detection/          model loading, inference, training scripts (mirrors Colab notebooks)
+  detection/          model loading, inference, local GPU training script
   explainability/     Grad-CAM / EigenCAM / LayerCAM wrappers
   segmentation/       vessel segmentation, optic disc/cup, macula detection
   report/             PDF report generation
