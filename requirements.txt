@@ -1,0 +1,25 @@
+# Core
+torch>=2.2
+torchvision>=0.17
+numpy
+pandas
+
+# Medical imaging utilities
+monai
+
+# Classical CV
+opencv-python
+scikit-image
+
+# Explainability
+grad-cam
+
+# App / viz
+streamlit
+plotly
+
+# Reporting
+reportlab
+
+# Dev
+pytest
