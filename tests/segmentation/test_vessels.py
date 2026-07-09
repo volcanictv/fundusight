@@ -2,9 +2,11 @@ import cv2
 import numpy as np
 
 from src.segmentation.vessels import (
+    VESSEL_WORKING_WIDTH,
     average_vessel_width,
     branch_point_count,
     compute_biomarkers,
+    compute_frangi_response,
     enhance_vessel_contrast,
     extract_vessel_channel,
     segment_vessels,
@@ -13,17 +15,29 @@ from src.segmentation.vessels import (
     vessel_density,
 )
 
+# Matches the caliber _FRANGI_SIGMAS (3..15) is tuned to detect, in pixels,
+# at VESSEL_WORKING_WIDTH resolution.
+_TARGET_LINE_WIDTH_AT_WORKING_RES = 12
 
-def _fundus_image(size=200, fov_value=180, line=True):
+
+def _fundus_image(native_width, fov_value=180, line=True):
+    # Built at `native_width` -- deliberately different from
+    # VESSEL_WORKING_WIDTH in the tests that use this -- with vessel
+    # thickness scaled so that AFTER segment_vessels()'s internal resize to
+    # VESSEL_WORKING_WIDTH, the line lands at a realistic width for the
+    # tuned sigma range. This exercises the actual internal-resize code
+    # path rather than only testing pre-canonicalized input.
+    #
     # A filled disc on a black background stands in for a fundus photo's
     # circular field of view (FOV) against the black border; an optional
     # dark curved stroke through it stands in for a vessel (vessels are
     # darker than surrounding tissue in the green channel).
-    image = np.zeros((size, size, 3), dtype=np.uint8)
-    center = size // 2
-    cv2.circle(image, (center, center), int(size * 0.45), (fov_value,) * 3, -1)
+    image = np.zeros((native_width, native_width, 3), dtype=np.uint8)
+    center = native_width // 2
+    cv2.circle(image, (center, center), int(native_width * 0.45), (fov_value,) * 3, -1)
     if line:
-        cv2.line(image, (int(size * 0.2), center), (int(size * 0.8), center), (40, 40, 40), 3)
+        thickness = max(1, round(_TARGET_LINE_WIDTH_AT_WORKING_RES * native_width / VESSEL_WORKING_WIDTH))
+        cv2.line(image, (int(native_width * 0.2), center), (int(native_width * 0.8), center), (40, 40, 40), thickness)
     return image
 
 
@@ -53,16 +67,37 @@ def test_enhance_vessel_contrast_increases_contrast():
 
 
 def test_segment_vessels_detects_line_and_ignores_flat_fov():
-    with_line = segment_vessels(_fundus_image(line=True))
-    without_line = segment_vessels(_fundus_image(line=False))
+    # Native resolution is 2x VESSEL_WORKING_WIDTH, so segment_vessels()
+    # must downsize internally before Frangi runs.
+    native_width = VESSEL_WORKING_WIDTH * 2
+    with_line = segment_vessels(_fundus_image(native_width, line=True))
+    without_line = segment_vessels(_fundus_image(native_width, line=False))
 
-    assert with_line.shape == (200, 200)
+    # Output is at the canonical working resolution, not the native input
+    # resolution -- proof the internal resize actually ran.
+    assert with_line.shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert with_line.dtype == bool
     # A perfectly flat FOV (no texture at all) has zero Frangi response
     # everywhere, so nothing should be flagged as a vessel.
     assert without_line.sum() == 0
     # The drawn line should be picked up as vessel-like structure.
     assert with_line.sum() > 0
+
+
+def test_compute_frangi_response_shapes_and_range():
+    # Native resolution differs from VESSEL_WORKING_WIDTH, same as the
+    # segment_vessels test above -- confirms the internal resize applies
+    # here too, since segment_vessels() now depends on this function for it.
+    native_width = VESSEL_WORKING_WIDTH * 2
+    enhanced, vesselness = compute_frangi_response(_fundus_image(native_width, line=True))
+
+    assert enhanced.shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
+    assert vesselness.shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
+    assert enhanced.dtype == np.float32
+    assert vesselness.dtype == np.float32
+    assert enhanced.min() >= 0.0 and enhanced.max() <= 1.0
+    # The drawn line should produce a non-trivial (unthresholded) response.
+    assert vesselness.max() > 0.0
 
 
 def test_skeletonize_vessels_thins_mask():
@@ -144,8 +179,27 @@ def test_average_vessel_width_larger_for_thick_mask():
     assert thick_width > thin_width
 
 
+def test_average_vessel_width_handles_fully_saturated_mask():
+    # cv2.distanceTransform has no background pixel to measure distance to
+    # when the mask covers the entire image, and returns FLT_MAX sentinels
+    # rather than erroring -- summing even a few overflows float32. A
+    # degenerate all-True mask (e.g. from an untrained hybrid model) isn't a
+    # real vessel mask, so this should return a defined, finite value rather
+    # than triggering that overflow.
+    mask = np.ones((20, 20), dtype=bool)
+    skeleton = np.zeros((20, 20), dtype=bool)
+    skeleton[10, 10] = True
+
+    assert average_vessel_width(mask, skeleton) == 0.0
+
+
 def test_compute_biomarkers_returns_expected_keys_and_types():
-    result = compute_biomarkers(_fundus_image(line=True))
+    # Native resolution is half of VESSEL_WORKING_WIDTH here (vs. 2x in the
+    # segment_vessels test above), so this exercises the internal-resize
+    # upsize path -- APTOS's smaller native images (e.g. 1050x1050) need
+    # this same path in real use.
+    native_width = VESSEL_WORKING_WIDTH // 2
+    result = compute_biomarkers(_fundus_image(native_width, line=True))
 
     assert set(result.keys()) == {
         "vessel_density",
@@ -159,7 +213,7 @@ def test_compute_biomarkers_returns_expected_keys_and_types():
     assert isinstance(result["branch_count"], int) and result["branch_count"] >= 0
     assert isinstance(result["tortuosity"], float)
     assert isinstance(result["average_width"], float) and result["average_width"] >= 0
-    assert result["mask"].shape == (200, 200)
-    assert result["skeleton"].shape == (200, 200)
+    assert result["mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
+    assert result["skeleton"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert result["mask"].dtype == bool
     assert result["skeleton"].dtype == bool

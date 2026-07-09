@@ -13,7 +13,17 @@ See `ROADMAP.md` for the phased build plan and `CLAUDE.md` for project conventio
    pip install -r requirements.txt
    ```
 2. Get a free Kaggle account and download the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) dataset into `APTOS 2019/` at the repo root, with `train_1.csv`/`valid.csv`/`test.csv` and matching `train_images/`/`val_images/`/`test_images/` folders (not committed to git — see `.gitignore`).
-3. For model training: if you have a local NVIDIA GPU, install the CUDA build of
+3. For the hybrid vessel segmentation model, download DRIVE, STARE, and
+   CHASE_DB1 into `DRIVE/`, `STARE/`, and `CHASE_DB1/` at the repo root
+   (also not committed to git). Expected layout:
+   - `DRIVE/training/images/*.tif` + `DRIVE/training/1st_manual/*.gif`
+     (the `DRIVE/test/` split has no vessel ground truth in the standard
+     download, so it isn't used for training).
+   - `STARE/stare-images/*.ppm.gz` + `STARE/labels-ah/*.ppm.gz` (loaded
+     directly from the gzip-compressed originals — no manual decompression
+     needed).
+   - `CHASE_DB1/Images/*.jpg` + `CHASE_DB1/Masks/*_1stHO.png`.
+4. For model training: if you have a local NVIDIA GPU, install the CUDA build of
    torch/torchvision (see the comment at the top of `requirements.txt`) and run
    `src/detection/train.py` directly. Otherwise use a Colab or Kaggle notebook
    with a free GPU runtime — see `notebooks/`. Training locally on CPU is not
@@ -29,6 +39,18 @@ Saves the best checkpoint (by validation quadratic weighted kappa) to
 `checkpoints/dr_efficientnet_b0.pth`. Current baseline (EfficientNet-B0, 15
 epochs, RTX 4060): held-out test accuracy 83.9%, AUC 0.925, quadratic weighted
 kappa 0.889.
+
+The hybrid vessel segmentation model (see "Repo layout" — `src/segmentation/`)
+is regenerated with:
+```
+.venv\Scripts\python.exe src\segmentation\vessel_train.py --epochs 150
+```
+Saves the best checkpoint (by validation clDice) to
+`checkpoints/vessel_unet.pth`, trained on the pooled DRIVE/STARE/CHASE_DB1
+labeled images (~68 total, 46/11/11 train/valid/test). Current baseline
+(ShallowDilatedUNet, 150 epochs, RTX 4060): held-out test Dice 0.663,
+clDice 0.832. Without this checkpoint, `vessels.segment_vessels()`'s
+classical Frangi + hysteresis-threshold pipeline is used as a fallback.
 
 ## Running Claude Code on this repo
 

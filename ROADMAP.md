@@ -61,12 +61,27 @@ Classical CV, no ML/GPU needed.
 
 ## Phase 5 — Vessel Segmentation (weeks 6-8)
 
-Classical CV, can run in parallel with Phase 3/4 training.
+Started as classical CV (can run in parallel with Phase 3/4 training), now
+upgraded to a hybrid classical+learned pipeline once the classical
+Frangi-only mask proved to under-segment thin peripheral vessels.
 
-- Pipeline: green channel → CLAHE → Frangi vesselness filter → threshold → skeletonize.
-- Compute vessel density, branching count, tortuosity, average width from the skeleton.
+- Classical stage (done): green channel → CLAHE → multi-scale Frangi
+  vesselness filter → hysteresis threshold → skeletonize. Still the
+  fallback path when no trained weights are available.
+- Hybrid stage: the raw Frangi vesselness response (not thresholded) is fed
+  as an extra input channel, alongside the CLAHE'd green channel, into a
+  small dilated-convolution U-Net trained on DRIVE/STARE/CHASE_DB1 (APTOS
+  has no pixel-level vessel labels) with a Dice + clDice loss, which learns
+  to refine the Frangi response rather than segmenting from raw pixels
+  alone.
+- Compute vessel density, branching count, tortuosity, average width from
+  the skeleton — same four biomarkers, now computed from whichever mask
+  (classical or hybrid) is in use.
 
-**Done when:** you can overlay a vessel mask on a fundus image and print out the four biomarkers.
+**Done when:** the hybrid model's vessel mask visibly recovers thin
+peripheral branches the classical Frangi-only mask missed, on the same
+sample image, with a held-out Dice/clDice score reported from training on
+DRIVE/STARE/CHASE_DB1.
 
 ## Phase 6 — Optic Disc / Macula Detection (week 8-9)
 
@@ -115,6 +130,9 @@ Classical CV, can run in parallel with Phase 3/4 training.
 | MESSIDOR | DR | Good cross-dataset validation set |
 | IDRiD | Lesion segmentation + grading | More granular labels |
 | DDR | Multi-lesion DR | Broader lesion types |
+| DRIVE | Vessel segmentation (pixel labels) | 40 images; only the 20-image training split ships vessel ground truth in the standard download — the test split has images + FOV masks but no vessel labels |
+| STARE | Vessel segmentation (pixel labels) | 20 images, hand-labeled by two independent experts; ships gzip-compressed (`.ppm.gz`) |
+| CHASE_DB1 | Vessel segmentation (pixel labels) | 28 images, two independent manual segmentations |
 
 ## Compute notes
 

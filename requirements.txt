@@ -31,3 +31,4 @@ reportlab
 
 # Dev
 pytest
+tqdm

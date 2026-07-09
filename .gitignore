@@ -1,10 +1,16 @@
 # data & weights
 data/
 APTOS 2019/
+DRIVE/
+STARE/
+CHASE_DB1/
 archive.zip
 *.pth
 *.pt
 *.ckpt
+
+# cached derived features (regenerable from the datasets above)
+.frangi_cache/
 
 # python
 __pycache__/
@@ -17,3 +23,6 @@ __pycache__/
 
 # script-generated output images
 scripts/*.png
+
+# training run logs
+*.log

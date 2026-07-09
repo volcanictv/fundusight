@@ -4,12 +4,13 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 6 — Optic Disc / Macula Detection
+**Current phase:** Phase 5 (hybrid stage) — Vessel Segmentation upgrade (Frangi + trained U-Net)
 
 ## Tech stack
 
 - PyTorch for deep learning; pretrained EfficientNet/ConvNeXt/DenseNet/Swin as backbones, fine-tuned, not trained from scratch.
 - OpenCV + scikit-image for classical CV (CLAHE, Frangi filter, skeletonization).
+- Vessel segmentation is a hybrid classical+learned pipeline: classical Frangi vesselness feeds a small dilated-convolution U-Net (trained on DRIVE/STARE/CHASE_DB1 with a Dice+clDice loss) that refines the final mask — see `src/segmentation/`.
 - pytorch-grad-cam for explainability (Grad-CAM, EigenCAM, LayerCAM).
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
@@ -22,7 +23,7 @@ src/
   preprocessing/     quality assessment, CLAHE, illumination correction
   detection/          model loading, inference, local GPU training script
   explainability/     Grad-CAM / EigenCAM / LayerCAM wrappers
-  segmentation/       vessel segmentation, optic disc/cup, macula detection
+  segmentation/       vessel biomarkers (classical Frangi baseline + trained hybrid U-Net), optic disc/cup, macula detection
   report/             PDF report generation
   app/                Streamlit dashboard
 notebooks/            Colab training notebooks (source of truth for trained weights)
