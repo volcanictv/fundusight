@@ -6,6 +6,9 @@ this is the only file in src/segmentation/ that imports torch for the
 module docstring) for anyone who only needs the classical baseline.
 """
 
+import functools
+import os
+
 import numpy as np
 import torch
 
@@ -13,6 +16,12 @@ from src.segmentation import vessels
 from src.segmentation.vessel_model import build_vessel_model
 
 _MASK_THRESHOLD = 0.5
+
+# Matches vessel_train.py's --output default and scripts/demo_vessels.py's
+# WEIGHTS_PATH -- the one place downstream callers (report generation, the
+# Streamlit app) should look for a trained checkpoint by default.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_WEIGHTS_PATH = os.path.join(_PROJECT_ROOT, "checkpoints", "vessel_unet.pth")
 
 
 def load_vessel_model(weights_path: str, device: str = "cpu") -> torch.nn.Module:
@@ -65,3 +74,25 @@ def compute_biomarkers_hybrid(image: np.ndarray, model: torch.nn.Module, device:
         "mask": mask,
         "skeleton": skeleton,
     }
+
+
+@functools.lru_cache(maxsize=1)
+def _cached_model(weights_path: str, device: str) -> torch.nn.Module:
+    # Downstream callers (report generation, the Streamlit app) call
+    # compute_biomarkers_auto() once per uploaded image -- cache the loaded
+    # model so repeated calls with the same (weights_path, device) don't
+    # re-read the checkpoint off disk and rebuild the network every time.
+    return load_vessel_model(weights_path, device)
+
+
+def compute_biomarkers_auto(image: np.ndarray, weights_path: str = DEFAULT_WEIGHTS_PATH, device: str = "cpu") -> dict:
+    """compute_biomarkers_hybrid() if a trained checkpoint exists at
+    weights_path, otherwise vessels.compute_biomarkers()'s classical
+    Frangi+hysteresis fallback. Same checkpoint-exists/fallback logic
+    scripts/demo_vessels.py uses, centralized here so report generation and
+    the app don't each need to reimplement it.
+    """
+    if os.path.exists(weights_path):
+        model = _cached_model(weights_path, device)
+        return compute_biomarkers_hybrid(image, model, device)
+    return vessels.compute_biomarkers(image)

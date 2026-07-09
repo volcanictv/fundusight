@@ -19,14 +19,12 @@ import pandas as pd
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 from src.segmentation.vessels import VESSEL_WORKING_WIDTH, compute_biomarkers
-from src.segmentation.vessel_infer import compute_biomarkers_hybrid, load_vessel_model
+from src.segmentation.vessel_infer import DEFAULT_WEIGHTS_PATH, compute_biomarkers_hybrid, load_vessel_model
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "APTOS 2019")
 IMG_DIR = os.path.join(DATA_DIR, "train_images", "train_images")
 OUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "vessels_grid.png")
-# Same checkpoint path src/segmentation/vessel_train.py's --output default
-# writes to, and README's regeneration instructions point at.
-WEIGHTS_PATH = os.path.join(PROJECT_ROOT, "checkpoints", "vessel_unet.pth")
+WEIGHTS_PATH = DEFAULT_WEIGHTS_PATH
 N_SAMPLES = 3
 # Final saved grid width -- purely a display concern for a viewable PNG, not
 # related to VESSEL_WORKING_WIDTH, which now drives the actual segmentation
