@@ -10,7 +10,7 @@ See ROADMAP.md for the full phased plan. Update the "Current phase" line below a
 
 - PyTorch for deep learning; pretrained EfficientNet/ConvNeXt/DenseNet/Swin as backbones, fine-tuned, not trained from scratch.
 - OpenCV + scikit-image for classical CV (CLAHE, Frangi filter, skeletonization).
-- Vessel segmentation is a hybrid classical+learned pipeline: classical Frangi vesselness feeds a small dilated-convolution U-Net (trained on DRIVE/STARE/CHASE_DB1 with a Dice+clDice loss) that refines the final mask — see `src/segmentation/`.
+- Vessel segmentation is a hybrid classical+learned pipeline: classical Frangi vesselness feeds a small dilated-convolution U-Net (trained on DRIVE/STARE/CHASE_DB1 with a Dice+clDice loss) that refines the final mask — see `src/segmentation/`. Downstream stages (report generation, the app) should call `vessel_infer.compute_biomarkers_auto()`, not `vessels.compute_biomarkers()` directly — it picks the hybrid model when a checkpoint exists and falls back to the classical pipeline otherwise, so callers don't need their own fallback logic.
 - pytorch-grad-cam for explainability (Grad-CAM, EigenCAM, LayerCAM).
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
