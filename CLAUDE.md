@@ -4,7 +4,7 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 1 — Image Quality Assessment
+**Current phase:** Phase 3 — DR Detection
 
 ## Tech stack
 
