@@ -4,7 +4,7 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 5 — Vessel Segmentation
+**Current phase:** Phase 6 — Optic Disc / Macula Detection
 
 ## Tech stack
 
