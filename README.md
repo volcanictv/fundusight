@@ -23,11 +23,10 @@ See `ROADMAP.md` for the phased build plan and `CLAUDE.md` for project conventio
      directly from the gzip-compressed originals — no manual decompression
      needed).
    - `CHASE_DB1/Images/*.jpg` + `CHASE_DB1/Masks/*_1stHO.png`.
-4. For model training: if you have a local NVIDIA GPU, install the CUDA build of
-   torch/torchvision (see the comment at the top of `requirements.txt`) and run
-   `src/detection/train.py` directly. Otherwise use a Colab or Kaggle notebook
-   with a free GPU runtime — see `notebooks/`. Training locally on CPU is not
-   practical either way.
+4. For model training: install the CUDA build of torch/torchvision on a local
+   NVIDIA GPU machine (see the comment at the top of `requirements.txt`) and
+   run `src/detection/train.py` / `src/segmentation/vessel_train.py`
+   directly. Training on CPU is not practical.
 
 ## Trained weights
 

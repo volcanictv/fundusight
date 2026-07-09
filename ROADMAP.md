@@ -5,7 +5,7 @@ AI-assisted retinal disease analysis pipeline. Educational/portfolio project —
 ## Ground rules
 
 - Build one vertical slice end-to-end before adding breadth. A working DR-only pipeline beats five half-built disease models.
-- Train on a GPU — Colab or Kaggle notebooks (free GPU tiers) if you don't have one locally, a local NVIDIA GPU via `src/detection/train.py` if you do. Don't try to fine-tune CNNs on a CPU.
+- Train on a local NVIDIA GPU via `src/detection/train.py`. Don't try to fine-tune CNNs on a CPU.
 - Use Claude Code with Plan Mode (Shift+Tab) for anything touching more than 2-3 files. Sonnet for implementation, Opus for planning/architecture calls (`/model opusplan`).
 - Commit to git after every working milestone. `/clear` your Claude Code session between unrelated phases.
 - Every phase below ends with something you can run and look at — not just code that compiles.
@@ -17,7 +17,6 @@ AI-assisted retinal disease analysis pipeline. Educational/portfolio project —
 - Install Claude Code, connect it to this repo, read through its basics (`/help`, Plan Mode, `/model`).
 - Set up Python env (3.10+), install `requirements.txt`.
 - Create a free Kaggle account, download APTOS 2019 Blindness Detection dataset.
-- Set up a Colab notebook linked to Google Drive for GPU training later.
 
 **Done when:** you can load and display a handful of APTOS images locally.
 
@@ -136,9 +135,7 @@ DRIVE/STARE/CHASE_DB1.
 
 ## Compute notes
 
-- Training: a local NVIDIA GPU works well if you have one — install the CUDA
-  build of torch/torchvision (see `requirements.txt`) and run
-  `src/detection/train.py` directly. Without a local GPU, use Colab (free T4 tier,
-  upgrade to Colab Pro if you need more hours) or Kaggle Notebooks (free GPU quota,
-  resets weekly).
+- Training: local NVIDIA GPU — install the CUDA build of torch/torchvision
+  (see `requirements.txt`) and run `src/detection/train.py` /
+  `src/segmentation/vessel_train.py` directly.
 - Inference/app: runs fine on CPU once models are trained — no GPU needed for the Streamlit demo.

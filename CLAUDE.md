@@ -14,7 +14,7 @@ See ROADMAP.md for the full phased plan. Update the "Current phase" line below a
 - pytorch-grad-cam for explainability (Grad-CAM, EigenCAM, LayerCAM).
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
-- Training happens locally on a local NVIDIA GPU via `src/detection/train.py` (CUDA-enabled torch — see `requirements.txt` for the install command); Colab/Kaggle notebooks are the fallback for anyone without a local GPU. Inference and the app run locally on CPU.
+- Training happens locally on a local NVIDIA GPU via `src/detection/train.py` / `src/segmentation/vessel_train.py` (CUDA-enabled torch — see `requirements.txt` for the install command). Inference and the app run locally on CPU.
 
 ## Repo layout
 
@@ -26,7 +26,6 @@ src/
   segmentation/       vessel biomarkers (classical Frangi baseline + trained hybrid U-Net), optic disc/cup, macula detection
   report/             PDF report generation
   app/                Streamlit dashboard
-notebooks/            Colab training notebooks (source of truth for trained weights)
 data/                 not committed — see README for dataset download instructions
 tests/                unit tests, mirrors src/ structure
 ```
