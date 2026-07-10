@@ -31,6 +31,7 @@ import numpy as np
 import streamlit as st
 
 from src.app.charts import probability_bar_chart
+from src.app.components import render_datagrid, render_pill, render_ring
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
 from src.app.render_preview import render_streamlit
@@ -66,9 +67,12 @@ def _safe_filename(text: str) -> str:
 def render_quality_section(quality: dict) -> None:
     st.subheader("Image Quality")
     cols = st.columns(3)
-    cols[0].metric("Quality score", f"{quality['score']:.0f}/100")
-    cols[1].metric("Focus", f"{quality['checks']['focus']['score']:.0f}/100")
-    cols[2].metric("Exposure", f"{quality['checks']['exposure']['score']:.0f}/100")
+    with cols[0]:
+        render_ring("Quality score", f"{quality['score']:.0f}", quality["score"])
+    with cols[1]:
+        render_ring("Focus", f"{quality['checks']['focus']['score']:.0f}", quality["checks"]["focus"]["score"])
+    with cols[2]:
+        render_ring("Exposure", f"{quality['checks']['exposure']['score']:.0f}", quality["checks"]["exposure"]["score"])
     if quality["passed"]:
         st.success("Image quality passed both checks.")
     else:
@@ -87,10 +91,17 @@ def render_preprocessing_section(preview: dict) -> None:
 
 
 def render_detection_section(detection: dict | None, cam_overlay) -> None:
-    st.subheader("Diabetic Retinopathy Detection")
+    header_col, pill_col = st.columns([4, 1])
+    with header_col:
+        st.subheader("Diabetic Retinopathy Detection")
     if detection is None:
         st.info("Detection model not available in this build — no trained checkpoint was found at the expected path.")
         return
+    with pill_col:
+        # No-DR reads as "normal" (emerald); any positive finding gets the
+        # same "needs attention" amber treatment content.py's recommendation
+        # text already uses -- a status color, not a graded severity scale.
+        render_pill(detection["label"], "emerald" if detection["class_idx"] == 0 else "amber")
     st.metric("Top estimate", detection["label"], f"{detection['probability'] * 100:.1f}% confidence")
     st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
     if cam_overlay is not None:
@@ -99,11 +110,17 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
     st.subheader("Vessel Biomarkers")
-    cols = st.columns(4)
-    cols[0].metric("Vessel density", f"{vessel_result['vessel_density']:.2f}%")
-    cols[1].metric("Branch points", vessel_result["branch_count"])
-    cols[2].metric("Tortuosity", f"{vessel_result['tortuosity']:.3f}")
-    cols[3].metric("Avg. width", f"{vessel_result['average_width']:.2f}px")
+    ring_col, grid_col = st.columns([1, 2])
+    with ring_col:
+        render_ring("Vessel density", f"{vessel_result['vessel_density']:.1f}%", vessel_result["vessel_density"])
+    with grid_col:
+        render_datagrid(
+            [
+                ("Branch points", str(vessel_result["branch_count"])),
+                ("Tortuosity", f"{vessel_result['tortuosity']:.3f}"),
+                ("Avg. width", f"{vessel_result['average_width']:.2f} px"),
+            ]
+        )
     st.image(
         _to_rgb(overlays.vessel_mask_overlay(working_image, vessel_result)),
         caption="Vessel mask overlay",
@@ -113,10 +130,20 @@ def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> Non
 
 def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray) -> None:
     st.subheader("Optic Disc / Cup / Macula")
-    cols = st.columns(3)
-    cols[0].metric("Vertical CDR", f"{optic_disc_result['vertical_cdr']:.3f}")
-    cols[1].metric("Disc diameter", f"{optic_disc_result['disc_diameter_px']}px")
-    cols[2].metric("Cup diameter", f"{optic_disc_result['cup_diameter_px']}px")
+    cdr = optic_disc_result["vertical_cdr"]
+    # Same 0.5 elevated-CDR threshold report/content.py's recommendation
+    # text already uses -- an educational observation, not a diagnosis.
+    ring_color = "#B45309" if cdr >= 0.5 else "#0071E3"
+    ring_col, grid_col = st.columns([1, 2])
+    with ring_col:
+        render_ring("Vertical CDR", f"{cdr:.2f}", cdr * 100, color=ring_color)
+    with grid_col:
+        render_datagrid(
+            [
+                ("Disc diameter", f"{optic_disc_result['disc_diameter_px']} px"),
+                ("Cup diameter", f"{optic_disc_result['cup_diameter_px']} px"),
+            ]
+        )
     if not optic_disc_result["disc_found"] or optic_disc_result["disc_diameter_px"] == 0:
         # disc_found only reflects Stage 6.1's classical localization
         # succeeding -- Stage 6.2's segmentation can still independently
@@ -129,6 +156,40 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
         caption="Disc (yellow) / cup (red) / macula (green)",
         width="stretch",
     )
+
+
+def render_image_comparison(result: dict) -> None:
+    """A single unified image viewer switching between every view the
+    pipeline produced, via st.pills (real Streamlit widget state/rerun
+    handling -- not inert custom HTML buttons, which can't communicate
+    back to Python without a full custom component). Reuses arrays
+    already computed elsewhere in `result`/overlays.* rather than
+    recomputing anything.
+
+    Deliberately called only once the FULL pipeline result is available
+    (see main flow below) rather than from inside on_stage -- some of
+    these images (Grad-CAM, the two overlays) don't exist yet mid-pipeline,
+    and threading "which images are ready so far" through a progressively
+    updating pills widget isn't worth the complexity for a comparison view
+    that's naturally a "look at everything together" step anyway, same
+    reasoning as why the Report Preview section only appears once
+    `result` is final.
+    """
+    st.subheader("Image Comparison")
+    images = {
+        "Original": result["preprocessing_preview"]["before"],
+        "Preprocessed": result["preprocessing_preview"]["after"],
+    }
+    if result["cam_overlay"] is not None:
+        images["Grad-CAM"] = result["cam_overlay"]
+    images["Vessel mask"] = overlays.vessel_mask_overlay(result["working_image"], result["vessels"])
+    images["Optic disc"] = overlays.optic_disc_overlay(result["working_image"], result["optic_disc"])
+
+    options = list(images)
+    selected = st.pills("Compare views", options, selection_mode="single", default=options[0], key="image_compare")
+    if selected is None:
+        selected = options[0]
+    st.image(_to_rgb(images[selected]), width="stretch")
 
 
 # stage_name -> (render function, extractor from the finished result dict).
@@ -147,9 +208,15 @@ _RENDER_BY_STAGE = {stage: fn for stage, fn, _ in _SECTIONS}
 
 
 st.title("VisionDx")
-st.caption(
-    "AI-assisted retinal disease analysis pipeline — educational/portfolio "
-    "demonstration, not a diagnostic device."
+# A floating footer instead of an inline caption -- doesn't interrupt the
+# page's flow. Fixed + centered + bounded-width, same proven pattern as
+# the progress banner (see theme.py's comment on .vdx-progress-banner for
+# why -- an edge-to-edge fixed element silently fails to paint its text
+# in this environment).
+st.markdown(
+    '<div class="vdx-disclaimer-footer">AI-assisted retinal disease analysis pipeline '
+    "— educational/portfolio demonstration, not a diagnostic device.</div>",
+    unsafe_allow_html=True,
 )
 
 # --- Sidebar: every input control lives here, so the main column stays
@@ -248,6 +315,8 @@ else:
         with st.container(key=f"vdx-section-{stage}-content"):
             fn(*extract(result))
 
+render_image_comparison(result)
+
 st.divider()
 
 # --- The "generation preview before export": a WYSIWYG mirror of the PDF,
@@ -267,3 +336,8 @@ st.caption(
     "To print: download the PDF above and print it (it's A4-formatted for "
     "clean printing), or use your browser's Print (Ctrl/Cmd+P) on this page."
 )
+# Reserves room at the very bottom of the page so the fixed disclaimer
+# footer doesn't sit on top of this last caption when scrolled all the way
+# down -- the footer floats over whatever's currently at the bottom of the
+# viewport, this just keeps that from being real content.
+st.markdown('<div class="vdx-footer-spacer"></div>', unsafe_allow_html=True)
