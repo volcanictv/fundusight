@@ -1,0 +1,473 @@
+"""Phase 6: Optic Disc / Cup / Macula Detection.
+
+Classical CV module -- stays torch-free on purpose, same reasoning as
+vessels.py: `locate_disc_classical()`, `crop_disc_roi()`, `compute_cdr()`,
+and `locate_macula_classical()` here are pure numpy/opencv/skimage, so both
+the classical-only fallback and the hybrid path in `optic_disc_infer.py`
+can call into them without pulling in torch.
+
+Pipeline (see ROADMAP.md Phase 6 for the three-stage breakdown):
+  Stage 6.1 (this file): locate the optic nerve head (ONH) as the largest
+    bright connected region in the field of view, crop a square region of
+    interest (ROI) around it. This crop is what corrects for class
+    imbalance -- the disc is a small fraction of a full fundus photo, so
+    segmenting it directly on the full image would be dominated by
+    background/easy negatives.
+  Stage 6.2 (optic_disc_model.py / optic_disc_infer.py): a trained U-Net
+    segments the ROI crop into background/disc-rim/cup. This file also
+    provides a classical intensity-threshold fallback for when no trained
+    checkpoint exists (segment_disc_cup_classical()), mirroring
+    vessels.segment_vessels()'s role for the vessel pipeline.
+  Stage 6.3 (this file): compute_cdr() turns disc/cup masks into a
+    vertical cup-to-disc ratio; locate_macula_classical() finds the
+    macula/fovea heuristically, since REFUGE2 (the disc/cup training
+    dataset) ships no fovea coordinate labels -- that part stays unlearned.
+
+Reuses vessels.VESSEL_WORKING_WIDTH / vessels._resize_to_working_width /
+vessels._fov_mask / vessels.extract_vessel_channel directly rather than
+re-deriving resolution-canonicalization or FOV-exclusion logic -- both
+pipelines work on the same kind of fundus photo, so there's no reason for
+a second, independent notion of "canonical resolution."
+"""
+
+import cv2
+import numpy as np
+from skimage.filters import threshold_otsu
+from skimage.measure import label, regionprops
+
+from src.segmentation import vessels
+
+# Size of the square crop fed to the Stage 6.2 network. COUPLED TO the
+# assumption (baked into optic_disc_dataset.py and optic_disc_train.py too)
+# that the network always sees a DISC_ROI_WIDTH x DISC_ROI_WIDTH image --
+# changing this requires retraining, it doesn't rescale automatically.
+DISC_ROI_WIDTH = 512
+
+# The ROI crop's side length is this many multiples of the estimated disc
+# diameter -- wide enough to comfortably contain the full disc (plus a
+# margin for a slightly-off centroid estimate) without cropping so wide
+# that the disc becomes a small fraction of the ROI again, which is
+# exactly the class-imbalance problem this crop exists to avoid.
+_DISC_ROI_CROP_MULTIPLE = 3.0
+
+# Typical optic disc diameter as a fraction of a well-framed fundus photo's
+# width -- used both as the disc-locating brightness-window size (see
+# locate_disc_classical) and as the fallback/default diameter estimate.
+# Real fundus photos vary in exact framing, but this is a reasonable prior
+# to search around rather than trust blindly -- locate_disc_classical
+# refines the actual diameter locally once it has found a candidate center.
+_EXPECTED_DISC_DIAMETER_FRACTION = 0.12
+
+# A locally-refined diameter estimate is only trusted within this multiple
+# of the expected diameter above/below -- guards against the same failure
+# mode a global brightness threshold has (a diffuse lesion cluster or an
+# illumination gradient can locally look "large and bright" too), just
+# scoped down from the whole image to a small window so it's far less
+# likely to trigger, and cheap to sanity-clamp when it still does.
+_DIAMETER_REFINEMENT_MIN_FACTOR = 0.4
+_DIAMETER_REFINEMENT_MAX_FACTOR = 2.5
+
+# How far from the disc center (in multiples of disc diameter) to search
+# for the macula/fovea -- clinically the macula sits roughly 2-2.5 disc
+# diameters temporal to the disc. Searched on BOTH sides of the disc along
+# the horizontal meridian since APTOS doesn't reliably indicate which eye
+# (left/right) a photo is of, so "temporal" could be either direction.
+_MACULA_SEARCH_RADIUS_FACTOR = 2.5
+
+# Radius (in multiples of disc diameter) of the disc region excluded from
+# the macula search, so a dark pixel right at the disc's own edge doesn't
+# get mistaken for the macula.
+_MACULA_DISC_EXCLUSION_FACTOR = 0.75
+
+
+def _largest_component_mask(binary: np.ndarray) -> np.ndarray:
+    """Boolean mask of just the largest connected component of `binary`,
+    empty if there are none. Used to turn a noisy brightness/darkness
+    threshold into a single coherent blob (the disc, or the cup) rather
+    than a scatter of small candidate regions.
+    """
+    labeled = label(binary)
+    if labeled.max() == 0:
+        return np.zeros_like(binary, dtype=bool)
+    counts = np.bincount(labeled.ravel())
+    counts[0] = 0  # background label -- never the "largest component"
+    return labeled == counts.argmax()
+
+
+def locate_disc_classical(image: np.ndarray) -> dict:
+    """Locate the optic disc as the center of the brightest disc-sized
+    *compact* patch within the field of view -- found via the average
+    brightness within a sliding window sized to the expected disc diameter
+    (cv2.boxFilter), not a per-pixel brightness threshold.
+
+    A global threshold (Otsu or otherwise) + largest-connected-component
+    looks appealing but breaks on real fundus photos: diffuse bright
+    lesions (e.g. diabetic retinopathy exudates) or a smooth illumination
+    gradient across the frame can each form a connected "bright" region far
+    larger than the actual disc, which a global threshold can't
+    distinguish from the real thing. Windowed *average* brightness instead
+    directly measures "is this a solid, compact, uniformly bright patch
+    the size of a disc" -- scattered lesions with gaps between them, or a
+    gradual gradient with no strong local peak, score much lower than the
+    disc's genuinely solid bright area does.
+
+    Resizes to VESSEL_WORKING_WIDTH internally (see vessels.py's module
+    docstring for why this must happen inside the function, not be left to
+    the caller) -- safe to call with either a raw native-resolution image
+    or an already-working-resolution one, since resizing to the same size
+    is a no-op.
+
+    Returns {"center_xy": (x, y), "diameter_px": float, "found": bool} in
+    working-image coordinates. "found"=False (with a fallback center/
+    diameter estimate so callers never crash on a degenerate image, e.g. a
+    synthetic test image or a photo with no visible disc) means no FOV --
+    or no brightness variation at all -- was found to search within.
+    """
+    working = vessels._resize_to_working_width(image)
+    green = vessels.extract_vessel_channel(working)
+    fov = vessels._fov_mask(green)
+    h, w = green.shape[:2]
+    expected_diameter = w * _EXPECTED_DISC_DIAMETER_FRACTION
+
+    if not fov.any():
+        return {"center_xy": (w / 2.0, h / 2.0), "diameter_px": expected_diameter, "found": False}
+
+    fov_pixels = green[fov]
+    if fov_pixels.min() == fov_pixels.max():
+        ys, xs = np.nonzero(fov)
+        return {"center_xy": (float(xs.mean()), float(ys.mean())), "diameter_px": expected_diameter, "found": False}
+
+    window_size = max(int(expected_diameter), 3)
+    windowed_brightness = cv2.boxFilter(green.astype(np.float32), ddepth=-1, ksize=(window_size, window_size))
+    candidate = np.where(fov, windowed_brightness, -1.0)
+    peak_y, peak_x = np.unravel_index(np.argmax(candidate), candidate.shape)
+    center_xy = (float(peak_x), float(peak_y))
+
+    diameter_px = _refine_disc_diameter(green, fov, center_xy, expected_diameter)
+    return {"center_xy": center_xy, "diameter_px": diameter_px, "found": True}
+
+
+def _refine_disc_diameter(green: np.ndarray, fov: np.ndarray, center_xy: tuple, expected_diameter: float) -> float:
+    """Refine the expected-diameter prior using Otsu + largest-connected-
+    component within a small window CENTERED ON THE ALREADY-FOUND peak,
+    rather than across the whole image -- local enough that a distant
+    lesion cluster or the far side of an illumination gradient can't reach
+    in and distort it, unlike the same technique applied globally. The
+    result is still clamped to a sane multiple of the expected diameter, in
+    case even this local estimate comes out implausible.
+    """
+    h, w = green.shape[:2]
+    cx, cy = center_xy
+    half = expected_diameter
+    x0, x1 = max(0, int(cx - half)), min(w, int(cx + half))
+    y0, y1 = max(0, int(cy - half)), min(h, int(cy + half))
+    local, local_fov = green[y0:y1, x0:x1], fov[y0:y1, x0:x1]
+
+    if local.size == 0 or not local_fov.any():
+        return expected_diameter
+    local_pixels = local[local_fov]
+    if local_pixels.min() == local_pixels.max():
+        return expected_diameter
+
+    local_bright = (local > threshold_otsu(local_pixels)) & local_fov
+    component = _largest_component_mask(local_bright)
+    if not component.any():
+        return expected_diameter
+
+    candidate_diameter = max(r.equivalent_diameter_area for r in regionprops(label(component)))
+    in_range = _DIAMETER_REFINEMENT_MIN_FACTOR * expected_diameter <= candidate_diameter <= _DIAMETER_REFINEMENT_MAX_FACTOR * expected_diameter
+    return float(candidate_diameter) if in_range else expected_diameter
+
+
+def crop_disc_roi(working_image: np.ndarray, center_xy: tuple, diameter_px: float, roi_width: int = DISC_ROI_WIDTH) -> tuple:
+    """Crop a square window of side `_DISC_ROI_CROP_MULTIPLE * diameter_px`
+    around `center_xy`, resized to `roi_width` x `roi_width`. If the window
+    would extend past the image bounds (common for an off-center disc near
+    the frame edge), it's SHIFTED to stay in bounds rather than truncated,
+    so the result is always exactly square -- a non-square crop would break
+    every downstream assumption that ROI-space is a fixed roi_width square.
+
+    Returns (roi_image, bbox_meta) where bbox_meta = {"x0", "y0", "x1",
+    "y1"} are the crop's bounds in working-image coordinates -- the only
+    information reproject_roi_mask_to_working() needs to invert the crop.
+    """
+    h, w = working_image.shape[:2]
+    cx, cy = center_xy
+    half = max((_DISC_ROI_CROP_MULTIPLE * diameter_px) / 2.0, 1.0)
+
+    x0, y0, x1, y1 = cx - half, cy - half, cx + half, cy + half
+    if x0 < 0:
+        x1 -= x0
+        x0 = 0.0
+    if y0 < 0:
+        y1 -= y0
+        y0 = 0.0
+    if x1 > w:
+        x0 -= x1 - w
+        x1 = float(w)
+    if y1 > h:
+        y0 -= y1 - h
+        y1 = float(h)
+    x0, y0 = max(x0, 0.0), max(y0, 0.0)
+
+    x0i, y0i = int(round(x0)), int(round(y0))
+    # min() here (rather than trusting x1/y1 directly) guards the
+    # degenerate case where the requested window is larger than the image
+    # itself -- always produces a valid, in-bounds, square crop.
+    side = max(min(int(round(x1)) - x0i, int(round(y1)) - y0i, w - x0i, h - y0i), 1)
+    x1i, y1i = x0i + side, y0i + side
+
+    roi = working_image[y0i:y1i, x0i:x1i]
+    roi_resized = cv2.resize(roi, (roi_width, roi_width), interpolation=cv2.INTER_LINEAR)
+    return roi_resized, {"x0": x0i, "y0": y0i, "x1": x1i, "y1": y1i}
+
+
+def reproject_roi_mask_to_working(roi_mask: np.ndarray, bbox_meta: dict, working_shape: tuple) -> np.ndarray:
+    """Inverse of crop_disc_roi(): resize a ROI-resolution mask back down
+    to the crop's original pixel size and paste it into a working-image-
+    sized canvas at the recorded bbox location. INTER_NEAREST keeps the
+    result boolean (no interpolated in-between values at the mask edge).
+    """
+    canvas = np.zeros(working_shape[:2], dtype=bool)
+    x0, y0, x1, y1 = bbox_meta["x0"], bbox_meta["y0"], bbox_meta["x1"], bbox_meta["y1"]
+    target_w, target_h = x1 - x0, y1 - y0
+    if target_w <= 0 or target_h <= 0:
+        return canvas
+    resized = cv2.resize(roi_mask.astype(np.uint8), (target_w, target_h), interpolation=cv2.INTER_NEAREST)
+    canvas[y0:y1, x0:x1] = resized.astype(bool)
+    return canvas
+
+
+def extract_color_features(roi_image: np.ndarray) -> np.ndarray:
+    """Build the 7-channel input Stage 6.2's model consumes from a BGR ROI
+    crop: RGB + Lab(a, b) + HSV(H, S), each normalized to roughly [0, 1]
+    float32, stacked as (7, H, W) -- see optic_disc_model.py's module
+    docstring for why these specific channels. Shared building block for
+    both training (optic_disc_dataset.py) and inference
+    (optic_disc_infer.py) so the channel order/normalization can never
+    drift between the two -- the same role vessels.compute_frangi_response()
+    plays for the vessel pipeline.
+    """
+    rgb = cv2.cvtColor(roi_image, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+    lab = cv2.cvtColor(roi_image, cv2.COLOR_BGR2LAB).astype(np.float32)
+    hsv = cv2.cvtColor(roi_image, cv2.COLOR_BGR2HSV).astype(np.float32)
+
+    # OpenCV encodes Lab's a/b as uint8 in [0, 255] representing the signed
+    # range [-128, 127] -- normalize onto roughly the same [0, 1] scale as
+    # the other channels rather than leaving them on a different range.
+    lab_ab = lab[:, :, 1:3] / 255.0
+    # OpenCV's 8-bit HSV convention: H in [0, 179], S in [0, 255].
+    hsv_hs = np.stack([hsv[:, :, 0] / 179.0, hsv[:, :, 1] / 255.0], axis=-1)
+
+    stacked = np.concatenate([rgb, lab_ab, hsv_hs], axis=-1)  # (H, W, 7)
+    return np.transpose(stacked, (2, 0, 1)).astype(np.float32)  # (7, H, W)
+
+
+def segment_disc_cup_classical(roi_image: np.ndarray) -> tuple:
+    """Classical disc/cup mask within an already-cropped ROI: the disc is
+    the largest bright connected region (same idea as locate_disc_classical,
+    now at ROI scale); the cup is the palest sub-region *within* the disc,
+    found via Otsu thresholding restricted to disc pixels (the neuroretinal
+    rim is more vascular/reddish, the cup is pale from tissue loss -- the
+    same pallor cue Stage 6.2's trained model also relies on, just captured
+    here with a single global threshold instead of a learned boundary).
+
+    This is a genuinely weaker estimate than the trained model -- it exists
+    only so compute_optic_biomarkers() (and compute_optic_biomarkers_auto()
+    in optic_disc_infer.py) keep working with no checkpoint, mirroring
+    vessels.segment_vessels()'s role as vessel_infer.py's fallback.
+    """
+    green = vessels.extract_vessel_channel(roi_image)
+    if green.min() == green.max():
+        return np.zeros_like(green, dtype=bool), np.zeros_like(green, dtype=bool)
+
+    threshold = threshold_otsu(green)
+    disc_candidate = green > threshold
+
+    if not disc_candidate.any():
+        return np.zeros_like(green, dtype=bool), np.zeros_like(green, dtype=bool)
+
+    disc_pixels = green[disc_candidate]
+    if disc_pixels.min() == disc_pixels.max():
+        # A perfectly flat disc region has no pallor contrast to threshold
+        # on -- there's no basis to claim a cup exists.
+        return _largest_component_mask(disc_candidate), np.zeros_like(green, dtype=bool)
+
+    cup_threshold = threshold_otsu(disc_pixels)
+    cup_candidate = (green >= cup_threshold) & disc_candidate
+    return clean_disc_cup_masks(disc_candidate, cup_candidate)
+
+
+def enforce_cup_within_disc(disc_mask: np.ndarray, cup_mask: np.ndarray) -> np.ndarray:
+    """The structural nesting guarantee: the cup is anatomically part of
+    the disc, so a cup mask can never legitimately extend outside the disc
+    mask. Independent per-class postprocessing (e.g. largest-connected-
+    component cleanup applied separately to each class) could otherwise
+    produce a cup mask that pokes outside the disc mask -- this is the
+    single choke point every code path routes through before returning a
+    cup mask, so that violation can never leak out.
+    """
+    return cup_mask & disc_mask
+
+
+def clean_disc_cup_masks(disc_mask: np.ndarray, cup_mask: np.ndarray) -> tuple:
+    """Post-processing step applied to a RAW disc/cup mask -- straight off
+    a per-pixel threshold (classical) or an argmax over class logits
+    (hybrid, see optic_disc_infer.segment_disc_cup_hybrid()) -- before any
+    geometry (compute_cdr(), overlay drawing) is computed from it:
+
+    1. Keep only the disc's largest connected component. A per-pixel
+       decision (threshold or argmax) can leave stray bright fragments or
+       edge-bleeding speckles disconnected from the true disc -- these
+       corrupt _vertical_extent()-based measurements badly, since even a
+       single stray pixel far from the real disc inflates the bounding-box
+       height used for CDR.
+    2. Restrict the cup to the now-CLEANED disc via enforce_cup_within_disc()
+       -- doing this after step 1, not before, matters: a cup fragment that
+       only looked "inside the disc" because of a stray disc fragment
+       (since discarded) must not survive either.
+    3. Keep only the cup's largest connected component too, so a cup that's
+       drifted into multiple disconnected pieces collapses to one coherent
+       central region instead of leaving orphaned speckles of its own.
+
+    Returns (disc_mask, cup_mask), both boolean, each a single connected
+    component (or empty).
+    """
+    disc_mask = _largest_component_mask(disc_mask)
+    cup_mask = _largest_component_mask(enforce_cup_within_disc(disc_mask, cup_mask))
+    return disc_mask, cup_mask
+
+
+def _vertical_extent(mask: np.ndarray) -> int:
+    """Height in pixels of the mask's bounding box (max row - min row + 1
+    over True pixels), 0 if the mask is empty. The basis for vertical CDR,
+    the clinically standard cup-to-disc ratio definition (as opposed to a
+    horizontal or area-based ratio).
+    """
+    rows_with_mask = np.any(mask, axis=1)
+    if not rows_with_mask.any():
+        return 0
+    row_indices = np.nonzero(rows_with_mask)[0]
+    return int(row_indices[-1] - row_indices[0] + 1)
+
+
+def compute_cdr(disc_mask: np.ndarray, cup_mask: np.ndarray) -> dict:
+    """Vertical cup-to-disc ratio from a disc mask and cup mask (of the
+    same shape). Always runs both through clean_disc_cup_masks() first --
+    keeping only the disc's largest connected component and restricting
+    the cup to it -- so the returned "disc_mask"/"cup_mask", and every
+    ratio computed from them, satisfy the structural guarantees regardless
+    of what the caller passed in. segment_disc_cup_classical() and
+    segment_disc_cup_hybrid() already do this same cleanup themselves
+    before compute_cdr() is ever called in the normal pipeline -- this is
+    a second, defensive application (cheap and a no-op on an
+    already-clean mask) so a stray disc fragment can never inflate
+    _vertical_extent()'s bounding-box measurement even for a caller that
+    doesn't route through them.
+
+    Returns {"vertical_cdr", "disc_diameter_px", "cup_diameter_px",
+    "disc_mask", "cup_mask"}. 0.0/0/0 if disc_mask is empty (mirrors
+    vessels.average_vessel_width()'s degenerate-input handling).
+    """
+    disc_mask, cup_mask = clean_disc_cup_masks(disc_mask, cup_mask)
+    disc_diameter_px = _vertical_extent(disc_mask)
+    cup_diameter_px = _vertical_extent(cup_mask)
+    vertical_cdr = float(cup_diameter_px) / disc_diameter_px if disc_diameter_px > 0 else 0.0
+    return {
+        "vertical_cdr": vertical_cdr,
+        "disc_diameter_px": disc_diameter_px,
+        "cup_diameter_px": cup_diameter_px,
+        "disc_mask": disc_mask,
+        "cup_mask": cup_mask,
+    }
+
+
+def locate_macula_classical(working_image: np.ndarray, disc_center_xy: tuple, disc_diameter_px: float) -> dict:
+    """Locate the macula/fovea heuristically: the darkest point within a
+    search window centered `_MACULA_SEARCH_RADIUS_FACTOR` disc-diameters
+    from the disc center, tried on both sides along the horizontal
+    meridian (no reliable eye-laterality info available), excluding the
+    disc region itself. A Gaussian blur first (scaled to disc size) avoids
+    a single dark vessel pixel winning over the true, more diffusely dark
+    macula/fovea region.
+
+    Returns {"location_xy": (x, y) | None, "found": bool} in working-image
+    coordinates. REFUGE2 (the Stage 6.2 training dataset) has no fovea
+    coordinate labels, so unlike disc/cup segmentation, this stays a
+    classical heuristic rather than a trained model -- see ROADMAP.md.
+    """
+    h, w = working_image.shape[:2]
+    green = vessels.extract_vessel_channel(working_image)
+    fov = vessels._fov_mask(green)
+    cx, cy = disc_center_xy
+
+    blur_sigma = max(disc_diameter_px * 0.15, 3.0)
+    blurred = cv2.GaussianBlur(green, (0, 0), sigmaX=blur_sigma).astype(np.float64)
+
+    search_dist = _MACULA_SEARCH_RADIUS_FACTOR * disc_diameter_px
+    search_radius = max(disc_diameter_px * 0.75, 1.0)
+
+    best_location = None
+    best_darkness = None
+    for direction in (-1.0, 1.0):
+        sx, sy = cx + direction * search_dist, cy
+        x_lo, x_hi = int(round(max(sx - search_radius, 0))), int(round(min(sx + search_radius, w)))
+        y_lo, y_hi = int(round(max(sy - search_radius, 0))), int(round(min(sy + search_radius, h)))
+        if x_hi <= x_lo or y_hi <= y_lo:
+            continue
+
+        window = blurred[y_lo:y_hi, x_lo:x_hi]
+        window_fov = fov[y_lo:y_hi, x_lo:x_hi].copy()
+        # Exclude anything still within reach of the disc itself.
+        yy, xx = np.mgrid[y_lo:y_hi, x_lo:x_hi]
+        window_fov &= (xx - cx) ** 2 + (yy - cy) ** 2 > (disc_diameter_px * _MACULA_DISC_EXCLUSION_FACTOR) ** 2
+        if not window_fov.any():
+            continue
+
+        candidate = np.where(window_fov, window, np.inf)
+        min_idx = np.unravel_index(np.argmin(candidate), candidate.shape)
+        min_val = candidate[min_idx]
+        if min_val == np.inf:
+            continue
+        if best_darkness is None or min_val < best_darkness:
+            best_darkness = min_val
+            best_location = (x_lo + int(min_idx[1]), y_lo + int(min_idx[0]))
+
+    if best_location is None:
+        return {"location_xy": None, "found": False}
+    return {"location_xy": best_location, "found": True}
+
+
+def compute_optic_biomarkers(image: np.ndarray) -> dict:
+    """Full classical-only pipeline: locate disc -> crop ROI -> classical
+    disc/cup segmentation -> reproject masks back to working-image space ->
+    CDR -> macula. This is what optic_disc_infer.compute_optic_biomarkers_
+    auto() falls back to when no trained checkpoint is available -- same
+    role vessels.compute_biomarkers() plays for the vessel pipeline.
+
+    Resizes to VESSEL_WORKING_WIDTH once up front so the same working image
+    is reused for disc localization, ROI cropping, mask reprojection, and
+    macula search -- avoids each sub-step independently (and redundantly)
+    re-deriving it, and keeps every returned mask in one consistent
+    coordinate space.
+    """
+    working = vessels._resize_to_working_width(image)
+    disc_info = locate_disc_classical(working)
+    roi_image, bbox_meta = crop_disc_roi(working, disc_info["center_xy"], disc_info["diameter_px"])
+    roi_disc_mask, roi_cup_mask = segment_disc_cup_classical(roi_image)
+
+    disc_mask = reproject_roi_mask_to_working(roi_disc_mask, bbox_meta, working.shape)
+    cup_mask = reproject_roi_mask_to_working(roi_cup_mask, bbox_meta, working.shape)
+    cdr_info = compute_cdr(disc_mask, cup_mask)
+    macula_info = locate_macula_classical(working, disc_info["center_xy"], disc_info["diameter_px"])
+
+    return {
+        "disc_mask": cdr_info["disc_mask"],
+        "cup_mask": cdr_info["cup_mask"],
+        "vertical_cdr": cdr_info["vertical_cdr"],
+        "disc_diameter_px": cdr_info["disc_diameter_px"],
+        "cup_diameter_px": cdr_info["cup_diameter_px"],
+        "macula_location": macula_info["location_xy"],
+        "disc_found": disc_info["found"],
+        "macula_found": macula_info["found"],
+    }

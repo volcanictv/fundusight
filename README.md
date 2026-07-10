@@ -23,10 +23,18 @@ See `ROADMAP.md` for the phased build plan and `CLAUDE.md` for project conventio
      directly from the gzip-compressed originals — no manual decompression
      needed).
    - `CHASE_DB1/Images/*.jpg` + `CHASE_DB1/Masks/*_1stHO.png`.
-4. For model training: install the CUDA build of torch/torchvision on a local
+4. For the hybrid optic disc/cup segmentation model, download REFUGE2 into
+   `REFUGE2/` at the repo root (also not committed to git). Expected
+   layout: `REFUGE2/{train,val,test}/images/*.jpg` +
+   `REFUGE2/{train,val,test}/mask/*.bmp` (train/test) or `*.png` (val).
+   Masks use pixel values `{0=cup, 128=disc rim, 255=background}`; REFUGE2
+   ships no fovea/macula coordinate labels, so macula localization stays a
+   classical heuristic (see `CLAUDE.md`).
+5. For model training: install the CUDA build of torch/torchvision on a local
    NVIDIA GPU machine (see the comment at the top of `requirements.txt`) and
-   run `src/detection/train.py` / `src/segmentation/vessel_train.py`
-   directly. Training on CPU is not practical.
+   run `src/detection/train.py` / `src/segmentation/vessel_train.py` /
+   `src/segmentation/optic_disc_train.py` directly. Training on CPU is not
+   practical.
 
 ## Trained weights
 
@@ -50,6 +58,18 @@ labeled images (~68 total, 46/11/11 train/valid/test). Current baseline
 (ShallowDilatedUNet, 150 epochs, RTX 4060): held-out test Dice 0.663,
 clDice 0.832. Without this checkpoint, `vessels.segment_vessels()`'s
 classical Frangi + hysteresis-threshold pipeline is used as a fallback.
+
+The hybrid optic disc/cup segmentation model is regenerated with:
+```
+.venv\Scripts\python.exe src\segmentation\optic_disc_train.py --epochs 80
+```
+Saves the best checkpoint (by validation mean Dice over the disc-rim and
+cup classes, background excluded) to `checkpoints/optic_disc_unet.pth`,
+trained on REFUGE2's official 400-image train split (400/400 val/test).
+Current baseline (OpticDiscUNet, 80 epochs, RTX 4060): held-out test
+dice_rim 0.670, dice_cup 0.450. Without this checkpoint,
+`optic_disc.compute_optic_biomarkers()`'s classical ONH-crop +
+intensity-threshold pipeline is used as a fallback.
 
 ## Running Claude Code on this repo
 
