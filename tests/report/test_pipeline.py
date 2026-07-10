@@ -3,7 +3,7 @@ import numpy as np
 import torch
 
 from src.detection.model import build_model
-from src.report.pipeline import run_pipeline
+from src.report.pipeline import STAGE_NAMES, run_pipeline
 
 _EXPECTED_KEYS = {
     "quality",
@@ -66,3 +66,50 @@ def test_run_pipeline_preprocessing_preview_keeps_raw_image_separate(tmp_path):
     assert preview["before"].shape == raw.shape
     assert preview["after"].shape == raw.shape
     assert not np.array_equal(preview["before"], preview["after"])
+
+
+def test_on_stage_fires_for_every_stage_in_order_without_detection_checkpoint(tmp_path):
+    # A determinate progress bar (src/app/progress.py) needs a FIXED,
+    # known-upfront stage count -- detection must still fire (with a
+    # (None, None) value) even with no checkpoint, so the total never
+    # varies at runtime.
+    missing_weights = str(tmp_path / "missing.pth")
+    observed = []
+
+    run_pipeline(
+        _fundus_image(),
+        detection_weights_path=missing_weights,
+        on_stage=lambda stage, value: observed.append((stage, value)),
+    )
+
+    assert [stage for stage, _ in observed] == list(STAGE_NAMES)
+    stage_values = dict(observed)
+    assert stage_values["detection"] == (None, None)
+    assert stage_values["quality"] is not None
+    vessels_value, working_image = stage_values["vessels"]
+    assert vessels_value is not None
+    assert working_image is not None
+
+
+def test_on_stage_fires_for_every_stage_in_order_with_detection_checkpoint(tmp_path):
+    weights_path = str(tmp_path / "dr_model.pth")
+    torch.save(build_model(pretrained=False).state_dict(), weights_path)
+    observed = []
+
+    run_pipeline(
+        _fundus_image(),
+        detection_weights_path=weights_path,
+        on_stage=lambda stage, value: observed.append((stage, value)),
+    )
+
+    assert [stage for stage, _ in observed] == list(STAGE_NAMES)
+    detection, cam_overlay = dict(observed)["detection"]
+    assert detection is not None
+    assert cam_overlay is not None
+
+
+def test_on_stage_none_by_default_does_not_raise():
+    # The default no-op path -- existing callers that don't pass on_stage
+    # must be unaffected.
+    result = run_pipeline(_fundus_image())
+    assert result["quality"] is not None

@@ -18,6 +18,7 @@ ROADMAP.md's Phase 6 note) requires no changes here.
 import datetime
 import functools
 import os
+from typing import Callable
 
 import numpy as np
 import torch
@@ -30,6 +31,15 @@ from src.preprocessing.quality import assess_quality
 from src.segmentation import vessels
 from src.segmentation.optic_disc_infer import compute_optic_biomarkers_auto
 from src.segmentation.vessel_infer import compute_biomarkers_auto
+
+# Single source of truth for progress-callback stage count/order -- the app
+# layer (src/app/main.py, src/app/progress.py) imports this rather than
+# duplicating the list, so a determinate progress bar always knows its true
+# total. Detection and Grad-CAM are deliberately ONE stage here (not two) so
+# this count stays fixed regardless of whether a DR checkpoint exists --
+# splitting them would make the total vary at runtime, which breaks a
+# determinate (not spinner-style) progress bar.
+STAGE_NAMES = ("quality", "preprocessing", "detection", "vessels", "optic_disc")
 
 
 @functools.lru_cache(maxsize=1)
@@ -60,6 +70,7 @@ def run_pipeline(
     cam_method: str = "gradcam",
     detection_weights_path: str = DETECTION_DEFAULT_WEIGHTS_PATH,
     device: str = "cpu",
+    on_stage: Callable[[str, object], None] | None = None,
 ) -> dict:
     """Run the full analysis pipeline on one BGR fundus photo (cv2.imread
     convention, matching every stage this calls into).
@@ -77,15 +88,40 @@ def run_pipeline(
     dataset.py documents that the classifier trains on plain resize +
     ImageNet normalization, and enhance.py's color normalization would
     create a train/inference mismatch.
+
+    `on_stage`, if given, is called once per STAGE_NAMES entry, in order,
+    right after that stage finishes, as `on_stage(stage_name, value)` --
+    this module stays Streamlit-agnostic (no import of streamlit here); the
+    caller (src/app/main.py) is the one that turns these callbacks into a
+    progress bar and progressive section rendering. `value` matches the
+    shape each stage's render function needs directly: the quality dict,
+    the preprocessing preview dict, `(detection, cam_overlay)`,
+    `(vessel_result, working_image)`, `(optic_disc_result, working_image)`.
+    working_image is computed up front (cheap, pure -- no dependency on any
+    other stage) specifically so the vessels/optic-disc callbacks can carry
+    it alongside their own result.
     """
+
+    def _emit(stage: str, value: object) -> None:
+        if on_stage is not None:
+            on_stage(stage, value)
+
+    working_image = vessels._resize_to_working_width(image)
+
     quality = assess_quality(image)
+    _emit("quality", quality)
+
     preprocessing_preview = {"before": image, "after": preprocess(image)}
+    _emit("preprocessing", preprocessing_preview)
 
     detection, cam_overlay = _run_detection(image, detection_weights_path, cam_method, device)
+    _emit("detection", (detection, cam_overlay))
 
     vessel_result = compute_biomarkers_auto(image, device=device)
+    _emit("vessels", (vessel_result, working_image))
+
     optic_disc_result = compute_optic_biomarkers_auto(image, device=device)
-    working_image = vessels._resize_to_working_width(image)
+    _emit("optic_disc", (optic_disc_result, working_image))
 
     return {
         "quality": quality,

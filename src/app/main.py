@@ -4,6 +4,14 @@ Ties every pipeline stage together: upload (or demo mode) -> quality ->
 preprocessing preview -> DR detection + Grad-CAM -> vessel biomarkers ->
 optic disc/cup/CDR -> an in-app report preview -> PDF download.
 
+v2: the pipeline runs progressively, not behind one opaque spinner. Each
+result section renders the moment its stage finishes (via
+report/pipeline.run_pipeline()'s on_stage callback), behind a sticky
+progress banner that stays pinned to the viewport regardless of scroll
+position, with skeleton placeholders filling the whole results area
+immediately so a scrolled-down user sees "this is loading," never a blank
+gap that reads as broken. See app/progress.py.
+
 Run with (from the repo root, matching this project's Windows venv
 convention -- see README):
 
@@ -24,6 +32,7 @@ import streamlit as st
 
 from src.app.charts import probability_bar_chart
 from src.app.demo_data import list_demo_images, load_demo_image
+from src.app.progress import ProgressBanner, render_error_card, render_skeleton
 from src.app.render_preview import render_streamlit
 from src.app.theme import inject_css
 from src.explainability.gradcam import CAM_METHODS
@@ -47,6 +56,94 @@ def _decode_upload(uploaded_file) -> np.ndarray:
 
 def _safe_filename(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", text).strip("_") or "report"
+
+
+# --- Per-section renderers. Each is exactly what used to be inline code
+# here before v2 -- extracted so both the progressive (cache-miss) and
+# direct (cache-hit) render paths below can call the same functions. ---
+
+
+def render_quality_section(quality: dict) -> None:
+    st.subheader("Image Quality")
+    cols = st.columns(3)
+    cols[0].metric("Quality score", f"{quality['score']:.0f}/100")
+    cols[1].metric("Focus", f"{quality['checks']['focus']['score']:.0f}/100")
+    cols[2].metric("Exposure", f"{quality['checks']['exposure']['score']:.0f}/100")
+    if quality["passed"]:
+        st.success("Image quality passed both checks.")
+    else:
+        st.warning("Image quality did not pass — findings below may be less reliable.")
+
+
+def render_preprocessing_section(preview: dict) -> None:
+    st.subheader("Preprocessing")
+    before_col, after_col = st.columns(2)
+    before_col.image(_to_rgb(preview["before"]), caption="Original", width="stretch")
+    after_col.image(
+        _to_rgb(preview["after"]),
+        caption="Illumination + CLAHE + color normalization",
+        width="stretch",
+    )
+
+
+def render_detection_section(detection: dict | None, cam_overlay) -> None:
+    st.subheader("Diabetic Retinopathy Detection")
+    if detection is None:
+        st.info("Detection model not available in this build — no trained checkpoint was found at the expected path.")
+        return
+    st.metric("Top estimate", detection["label"], f"{detection['probability'] * 100:.1f}% confidence")
+    st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
+    if cam_overlay is not None:
+        st.image(_to_rgb(cam_overlay), caption="Grad-CAM attention map", width="stretch")
+
+
+def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
+    st.subheader("Vessel Biomarkers")
+    cols = st.columns(4)
+    cols[0].metric("Vessel density", f"{vessel_result['vessel_density']:.2f}%")
+    cols[1].metric("Branch points", vessel_result["branch_count"])
+    cols[2].metric("Tortuosity", f"{vessel_result['tortuosity']:.3f}")
+    cols[3].metric("Avg. width", f"{vessel_result['average_width']:.2f}px")
+    st.image(
+        _to_rgb(overlays.vessel_mask_overlay(working_image, vessel_result)),
+        caption="Vessel mask overlay",
+        width="stretch",
+    )
+
+
+def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray) -> None:
+    st.subheader("Optic Disc / Cup / Macula")
+    cols = st.columns(3)
+    cols[0].metric("Vertical CDR", f"{optic_disc_result['vertical_cdr']:.3f}")
+    cols[1].metric("Disc diameter", f"{optic_disc_result['disc_diameter_px']}px")
+    cols[2].metric("Cup diameter", f"{optic_disc_result['cup_diameter_px']}px")
+    if not optic_disc_result["disc_found"] or optic_disc_result["disc_diameter_px"] == 0:
+        # disc_found only reflects Stage 6.1's classical localization
+        # succeeding -- Stage 6.2's segmentation can still independently
+        # come back empty (a real, observed failure mode on out-of-domain
+        # input with the current provisional checkpoint, see ROADMAP.md's
+        # Phase 6 note), which disc_found alone wouldn't catch.
+        st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
+    st.image(
+        _to_rgb(overlays.optic_disc_overlay(working_image, optic_disc_result)),
+        caption="Disc (yellow) / cup (red) / macula (green)",
+        width="stretch",
+    )
+
+
+# stage_name -> (render function, extractor from the finished result dict).
+# Single source of truth for both render paths below, and for on_stage's
+# dispatch -- the on_stage callback value is already shaped to match each
+# render function's positional args directly (see pipeline.run_pipeline's
+# docstring), so both paths call `fn(*args)` against the same functions.
+_SECTIONS = [
+    ("quality", render_quality_section, lambda r: (r["quality"],)),
+    ("preprocessing", render_preprocessing_section, lambda r: (r["preprocessing_preview"],)),
+    ("detection", render_detection_section, lambda r: (r["detection"], r["cam_overlay"])),
+    ("vessels", render_vessel_section, lambda r: (r["vessels"], r["working_image"])),
+    ("optic_disc", render_optic_disc_section, lambda r: (r["optic_disc"], r["working_image"])),
+]
+_RENDER_BY_STAGE = {stage: fn for stage, fn, _ in _SECTIONS}
 
 
 st.title("VisionDx")
@@ -94,88 +191,62 @@ if image is None:
     st.info("Upload a fundus photo or turn on demo mode in the sidebar to get started.")
     st.stop()
 
-# --- Run the pipeline once per (image, patient id, CAM method) combination,
-# cached in session_state -- unrelated widget interactions on a rerun
-# (Streamlit reruns the whole script top-to-bottom on every interaction)
-# shouldn't recompute a several-second analysis pipeline. The DR detection
-# model itself is cached at a lower level already (pipeline._cached_detection_model),
-# so this cache is about skipping the whole run, not just model loading. ---
-cache_key = (hashlib.md5(image.tobytes()).hexdigest(), effective_patient_id, cam_method)
-if st.session_state.get("_vdx_cache_key") != cache_key:
-    with st.spinner("Running analysis pipeline…"):
-        st.session_state["_vdx_result"] = run_pipeline(image, patient_id=effective_patient_id, cam_method=cam_method)
-    st.session_state["_vdx_cache_key"] = cache_key
-
-result = st.session_state["_vdx_result"]
-
 st.header("Results")
 
-# Quality
-st.subheader("Image Quality")
-quality = result["quality"]
-cols = st.columns(3)
-cols[0].metric("Quality score", f"{quality['score']:.0f}/100")
-cols[1].metric("Focus", f"{quality['checks']['focus']['score']:.0f}/100")
-cols[2].metric("Exposure", f"{quality['checks']['exposure']['score']:.0f}/100")
-if quality["passed"]:
-    st.success("Image quality passed both checks.")
+cache_key = (hashlib.md5(image.tobytes()).hexdigest(), effective_patient_id, cam_method)
+is_new_computation = st.session_state.get("_vdx_cache_key") != cache_key
+
+if is_new_computation:
+    # The banner is created FIRST, immediately after the "Results" header
+    # and before any section placeholder -- position: sticky keeps it
+    # pinned to the viewport top once scrolled past, but only from
+    # wherever it sits in DOM order onward. Creating it after the section
+    # placeholders (tried first, caught live) put five skeleton/result
+    # blocks above it, so scrolling past the header still left the banner
+    # off-screen below real content -- the exact bug this page exists to
+    # fix, just moved. It has to be the first thing in the results flow.
+    banner = ProgressBanner()
+
+    # Skeleton placeholders for every section, filled immediately -- the
+    # whole results area shows loading shape at once, not just a banner
+    # near the top, so a scrolled-down user sees "this is loading"
+    # wherever they're looking, not a blank gap.
+    # Streamlit requires every `key=` to be unique across the WHOLE script
+    # run, even across sequential writes to the same st.empty() placeholder
+    # -- the skeleton and the real content for a section can't share one
+    # key, hence the "-skeleton"/"-content" suffixes below. Both still
+    # match theme.py's `[class*="st-key-vdx-section-"]` substring selector.
+    placeholders = {}
+    for stage, _, _ in _SECTIONS:
+        placeholders[stage] = st.empty()
+        with placeholders[stage].container(key=f"vdx-section-{stage}-skeleton"):
+            render_skeleton(stage)
+
+    def on_stage(stage_name, value):
+        banner.advance(stage_name)
+        args = value if isinstance(value, tuple) else (value,)
+        with placeholders[stage_name].container(key=f"vdx-section-{stage_name}-content"):
+            _RENDER_BY_STAGE[stage_name](*args)
+
+    try:
+        result = run_pipeline(
+            image, patient_id=effective_patient_id, cam_method=cam_method, on_stage=on_stage
+        )
+    except Exception as exc:
+        banner.finish()
+        render_error_card(exc)
+        st.stop()
+
+    banner.finish()
+    st.session_state["_vdx_result"] = result
+    st.session_state["_vdx_cache_key"] = cache_key
 else:
-    st.warning("Image quality did not pass — findings below may be less reliable.")
-
-# Preprocessing preview
-st.subheader("Preprocessing")
-before_col, after_col = st.columns(2)
-before_col.image(_to_rgb(result["preprocessing_preview"]["before"]), caption="Original", width="stretch")
-after_col.image(
-    _to_rgb(result["preprocessing_preview"]["after"]),
-    caption="Illumination + CLAHE + color normalization",
-    width="stretch",
-)
-
-# Detection + explainability
-st.subheader("Diabetic Retinopathy Detection")
-detection = result["detection"]
-if detection is None:
-    st.info("Detection model not available in this build — no trained checkpoint was found at the expected path.")
-else:
-    st.metric("Top estimate", detection["label"], f"{detection['probability'] * 100:.1f}% confidence")
-    st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
-    if result["cam_overlay"] is not None:
-        st.image(_to_rgb(result["cam_overlay"]), caption="Grad-CAM attention map", width="stretch")
-
-# Vessel biomarkers
-st.subheader("Vessel Biomarkers")
-vessel_result = result["vessels"]
-cols = st.columns(4)
-cols[0].metric("Vessel density", f"{vessel_result['vessel_density']:.2f}%")
-cols[1].metric("Branch points", vessel_result["branch_count"])
-cols[2].metric("Tortuosity", f"{vessel_result['tortuosity']:.3f}")
-cols[3].metric("Avg. width", f"{vessel_result['average_width']:.2f}px")
-st.image(
-    _to_rgb(overlays.vessel_mask_overlay(result["working_image"], vessel_result)),
-    caption="Vessel mask overlay",
-    width="stretch",
-)
-
-# Optic disc / cup / macula
-st.subheader("Optic Disc / Cup / Macula")
-optic_disc_result = result["optic_disc"]
-cols = st.columns(3)
-cols[0].metric("Vertical CDR", f"{optic_disc_result['vertical_cdr']:.3f}")
-cols[1].metric("Disc diameter", f"{optic_disc_result['disc_diameter_px']}px")
-cols[2].metric("Cup diameter", f"{optic_disc_result['cup_diameter_px']}px")
-if not optic_disc_result["disc_found"] or optic_disc_result["disc_diameter_px"] == 0:
-    # disc_found only reflects Stage 6.1's classical localization succeeding
-    # -- Stage 6.2's segmentation can still independently come back empty
-    # (a real, observed failure mode on out-of-domain input with the
-    # current provisional checkpoint, see ROADMAP.md's Phase 6 note), which
-    # disc_found alone wouldn't catch.
-    st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
-st.image(
-    _to_rgb(overlays.optic_disc_overlay(result["working_image"], optic_disc_result)),
-    caption="Disc (yellow) / cup (red) / macula (green)",
-    width="stretch",
-)
+    # Nothing new to compute -- redraw the cached sections directly, no
+    # staged reveal or skeletons (there's no actual loading happening).
+    result = st.session_state["_vdx_result"]
+    for stage, fn, extract in _SECTIONS:
+        with st.container(key=f"vdx-section-{stage}-content"):
+            fn(*extract(result))
 
 st.divider()
 
