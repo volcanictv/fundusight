@@ -4,7 +4,7 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 6 — Optic Disc / Cup / Macula Detection (classical ONH localization + REFUGE2-trained disc/cup U-Net + CDR)
+**Current phase:** Phase 8/9 done — PDF report generation (`src/report/`) + Streamlit dashboard (`src/app/`). Phase 6's optic-disc/cup retrain on the pooled/re-split REFUGE2 data is still parked (see ROADMAP.md's Phase 6 "Known issue"), and Phase 7 (multi-disease) hasn't been started.
 
 ## Tech stack
 
@@ -15,6 +15,7 @@ See ROADMAP.md for the full phased plan. Update the "Current phase" line below a
 - pytorch-grad-cam for explainability (Grad-CAM, EigenCAM, LayerCAM).
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
+- Report generation and the dashboard share one pipeline orchestrator (`src/report/pipeline.run_pipeline()`) and one renderer-agnostic content model (`src/report/content.py`), so the PDF (`src/report/pdf.py`) and the in-app "preview before export" (`src/app/render_preview.py`) can't drift apart in content, only in presentation. `src/app/main.py` is the Streamlit entrypoint; run it with `.venv\Scripts\python.exe -m streamlit run src/app/main.py`.
 - Training happens locally on a local NVIDIA GPU via `src/detection/train.py` / `src/segmentation/vessel_train.py` (CUDA-enabled torch — see `requirements.txt` for the install command). Inference and the app run locally on CPU.
 
 ## Repo layout

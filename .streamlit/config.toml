@@ -1,0 +1,13 @@
+# Theme colors, matching src/app/theme.py's CSS and report/pdf.py's palette
+# so widgets Streamlit itself colors from theme tokens (toggles, sliders,
+# spinners, focus rings, links) don't default to Streamlit's own red/orange
+# accent -- those aren't reachable by CSS override the way plain HTML
+# elements are, since several BaseWeb components color themselves from
+# these config values directly rather than from CSS custom properties.
+[theme]
+base = "light"
+primaryColor = "#0071E3"
+backgroundColor = "#FBFBFD"
+secondaryBackgroundColor = "#F2F2F5"
+textColor = "#1D1D1F"
+font = "sans serif"

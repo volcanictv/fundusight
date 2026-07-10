@@ -6,12 +6,23 @@ how the rest of the pipeline (quality.py, enhance.py) and the eventual
 Streamlit app operate.
 """
 
+import os
+
 import cv2
 import numpy as np
 import torch
 
 from src.detection.dataset import build_transforms
 from src.detection.model import SEVERITY_LABELS, build_model
+
+# Matches train.py's --output default and scripts/demo_infer.py's
+# WEIGHTS_PATH -- the one place downstream callers (report generation, the
+# Streamlit app) should look for a trained checkpoint by default. Mirrors
+# vessel_infer.DEFAULT_WEIGHTS_PATH / optic_disc_infer.DEFAULT_WEIGHTS_PATH,
+# even though (unlike those two) there's no classical fallback here -- a
+# missing checkpoint just means detection is unavailable.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_WEIGHTS_PATH = os.path.join(_PROJECT_ROOT, "checkpoints", "dr_efficientnet_b0.pth")
 
 
 def load_model(weights_path: str, device: str = "cpu") -> torch.nn.Module:

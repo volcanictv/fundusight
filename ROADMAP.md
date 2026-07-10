@@ -167,14 +167,31 @@ disc/cup segmentation model.
 
 - ReportLab PDF: patient ID, quality score, disease probabilities, vessel/CDR measurements, attention map thumbnails, recommendation text.
 
-**Done when:** uploading an image produces a downloadable PDF report.
+**Done when:** uploading an image produces a downloadable PDF report. **Status:
+done** — `src/report/pipeline.py` orchestrates quality/preprocessing-preview/
+detection+Grad-CAM/vessel/optic-disc into one dict (degrading gracefully, not
+crashing, when no DR checkpoint is present — there's no classical fallback for
+detection unlike vessels/optic-disc); `src/report/content.py` turns that into a
+renderer-agnostic `ReportContent`; `src/report/pdf.py` renders it to a
+print-ready A4 PDF (ReportLab, fixed margins, embedded thumbnails, page
+footer/disclaimer).
 
 ## Phase 9 — Dashboard (weeks 12-13)
 
 - Streamlit or Gradio app tying everything together: upload → quality → detection → heatmap → measurements → report download.
 - Plotly for the probability bars / metrics.
 
-**Done when:** a stranger can upload a fundus photo and get the full pipeline output through the UI, no code required.
+**Done when:** a stranger can upload a fundus photo and get the full pipeline
+output through the UI, no code required. **Status: done** — see
+`src/app/main.py`: upload or a demo-mode toggle (reads locally-downloaded
+APTOS sample images only, never bundled — see the Datasets table's licensing
+note) → quality → before/after preprocessing → detection + Grad-CAM + an
+ordinal-ramp Plotly probability chart → vessel biomarkers → optic disc/CDR →
+an in-app "generation preview" (`src/app/render_preview.py`) that mirrors the
+PDF exactly, built from the same `ReportContent` → PDF download. The PDF's A4
+layout is the primary print path; a light `@media print` rule
+(`src/app/theme.py`) also cleans up the live preview screen for a direct
+browser print.
 
 ---
 
@@ -189,7 +206,7 @@ disc/cup segmentation model.
 
 | Dataset | Use for | Notes |
 |---|---|---|
-| APTOS 2019 | DR grading | Best starting point — single CSV, ~3.6k images, Kaggle |
+| APTOS 2019 | DR grading | Best starting point — single CSV, ~3.6k images, Kaggle-licensed and not redistributable, so it's gitignored locally and the dashboard's demo mode (Phase 9) only ever reads it off disk, never bundles a copy |
 | EyePACS | DR grading | Much larger, use once pipeline works on APTOS |
 | REFUGE2 | Optic disc/cup segmentation, CDR | 1200 images; official train/val/test folders (400 each) are each a single camera/site domain (see Phase 6's "Known issue"), so pooled and re-split instead; masks use pixel values {0=cup, 128=disc rim, 255=background}; no fovea/macula coordinate labels |
 | MESSIDOR | DR | Good cross-dataset validation set |
