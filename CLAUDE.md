@@ -6,6 +6,8 @@ See ROADMAP.md for the full phased plan. Update the "Current phase" line below a
 
 **Current phase:** Phase 8/9 done — PDF report generation (`src/report/`) + Streamlit dashboard (`src/app/`). Phase 6's optic-disc/cup retrain on the pooled/re-split REFUGE2 data is still parked (see ROADMAP.md's Phase 6 "Known issue"), and Phase 7 (multi-disease) hasn't been started.
 
+**Known issue — dashboard visual design is a first pass, not final:** the current look (bento cards, ring/pill/data-grid components in `src/app/components.py`, Inter/JetBrains Mono typography, `src/app/theme.py`'s CSS) is a functional, verified-working iteration, not a finished design. It still needs a real design pass — spacing/hierarchy consistency across sections, mobile/narrow-viewport behavior (never checked, the app was only verified at desktop widths), and a general polish pass beyond "the individual pieces work" — before treating the visual layer as done the way the underlying pipeline/report logic is.
+
 ## Tech stack
 
 - PyTorch for deep learning; pretrained EfficientNet/ConvNeXt/DenseNet/Swin as backbones, fine-tuned, not trained from scratch.
