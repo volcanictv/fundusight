@@ -6,6 +6,11 @@ See `ROADMAP.md` for the phased build plan and `CLAUDE.md` for project conventio
 
 ## Setup
 
+0. Clone the repo:
+   ```
+   git clone https://github.com/volcanictv/fundusight.git
+   cd fundusight
+   ```
 1. Python 3.10+
    ```
    python -m venv .venv
@@ -65,11 +70,38 @@ The hybrid optic disc/cup segmentation model is regenerated with:
 ```
 Saves the best checkpoint (by validation mean Dice over the disc-rim and
 cup classes, background excluded) to `checkpoints/optic_disc_unet.pth`,
-trained on REFUGE2's official 400-image train split (400/400 val/test).
-Current baseline (OpticDiscUNet, 80 epochs, RTX 4060): held-out test
-dice_rim 0.670, dice_cup 0.450. Without this checkpoint,
-`optic_disc.compute_optic_biomarkers()`'s classical ONH-crop +
+trained on a pooled, re-stratified split of all 1200 REFUGE2 labeled images
+(train=840/val=180/test=180) rather than REFUGE2's own official folders,
+which turned out to be a three-way camera/domain split — see `ROADMAP.md`'s
+Phase 6 for why. Current baseline (OpticDiscUNet, 80 epochs, RTX 4060):
+held-out test dice_rim 0.894, dice_cup 0.858. Full-pipeline evaluation
+(classical ONH localization + network + post-processing, run with
+`.venv\Scripts\python.exe scripts\evaluate_optic_disc_full_pipeline.py`)
+gives mean absolute CDR error 0.057 against ground truth. Without this
+checkpoint, `optic_disc.compute_optic_biomarkers()`'s classical ONH-crop +
 intensity-threshold pipeline is used as a fallback.
+
+## Running the app
+
+```
+.venv\Scripts\python.exe -m streamlit run src\app\main.py
+```
+Opens the Streamlit dashboard. Upload a fundus photo, or turn on "Demo
+mode" in the sidebar to try it against a locally available APTOS 2019
+sample instead — demo mode needs that dataset already downloaded per step 2
+above. The DR detection and Grad-CAM sections only appear once
+`checkpoints/dr_efficientnet_b0.pth` exists (see "Trained weights" below);
+vessel and optic disc/cup biomarkers work either way, falling back to their
+classical pipelines when a trained checkpoint is missing.
+
+## Running tests
+
+```
+.venv\Scripts\python.exe -m pytest
+```
+Runs the full suite (`tests/`, mirrors `src/` structure). Tests use small
+real or synthetic sample images and don't require the full datasets to be
+downloaded.
 
 ## Running Claude Code on this repo
 
