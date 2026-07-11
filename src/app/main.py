@@ -43,7 +43,7 @@ from src.app.components import render_datagrid, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
 from src.app.render_preview import render_streamlit
-from src.app.theme import inject_css
+from src.app.theme import inject_ambient_cursor, inject_css
 from src.explainability.gradcam import CAM_METHODS
 from src.report import overlays
 from src.report.content import build_report_content
@@ -52,6 +52,7 @@ from src.report.pipeline import run_pipeline
 
 st.set_page_config(page_title="VisionDx", page_icon="\U0001f441", layout="wide")
 inject_css()
+inject_ambient_cursor()
 
 # CSS custom-property references, not hex literals -- theme.py's :root is
 # the single source of truth for these two accent colors; every caller here
@@ -179,6 +180,12 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
 
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
+    # No inline overlay image here -- same density pattern the Disease
+    # Screening tiles already use: the vessel mask overlay is one of the
+    # views in the Image Comparison pills viewer below, so showing it again
+    # here would be the exact repeated-full-size-image redundancy that
+    # redesign already fixed for DR/glaucoma/AMD, just not carried through
+    # to this section yet.
     _tile_label("Vessel Biomarkers")
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
@@ -191,14 +198,12 @@ def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> Non
                 ("Avg. width", f"{vessel_result['average_width']:.2f} px"),
             ]
         )
-    st.image(
-        _to_rgb(overlays.vessel_mask_overlay(working_image, vessel_result)),
-        caption="Vessel mask overlay",
-        width="stretch",
-    )
 
 
 def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray) -> None:
+    # Same redundancy fix as render_vessel_section above -- the disc/cup/
+    # macula overlay is already one of the Image Comparison views below, so
+    # it no longer repeats inline here.
     _tile_label("Optic Disc / Cup / Macula")
     cdr = optic_disc_result["vertical_cdr"]
     # Same 0.5 elevated-CDR threshold report/content.py's recommendation
@@ -221,11 +226,6 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
         # input with the current provisional checkpoint, see ROADMAP.md's
         # Phase 6 note), which disc_found alone wouldn't catch.
         st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
-    st.image(
-        _to_rgb(overlays.optic_disc_overlay(working_image, optic_disc_result)),
-        caption="Disc (yellow) / cup (red) / macula (green)",
-        width="stretch",
-    )
 
 
 def render_image_comparison(result: dict) -> None:

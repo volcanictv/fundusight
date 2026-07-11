@@ -66,19 +66,32 @@ _CSS = f"""
     --vdx-font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Consolas, monospace;
 }}
 
-/* A very subtle two-tone wash (faint warm glow upper-left, faint cool glow
-   lower-right, both low-opacity radial gradients over the base neutral) --
-   a flat single-hue background gives frosted glass nothing to actually
-   refract, which makes glassmorphism pointless. The base neutral itself
-   (#ECEEF3) is also deliberately deeper than a near-white card so glass
-   cards read as visibly translucent against it, not just "a white box on
-   an almost-identical off-white page" (the old design's bg/card contrast
-   was only ~2%, too flat for glass to read). */
+/* Ambient cursor-following glow -- the one deliberate exception to an
+   otherwise no-gradients brief. `--vdx-mouse-x`/`--vdx-mouse-y` are written
+   by inject_ambient_cursor()'s JS (a CCv2 component, see below) onto
+   `documentElement`, so this radial gradient's *position* tracks the
+   cursor while its *color* stays strictly monochromatic (white fading to
+   the near-white base, no hue) -- a faint light-following effect, not a
+   visible color gradient. `background-attachment: fixed` ties it to the
+   viewport (not scrolled content), matching the mouse coordinates' own
+   viewport-relative frame. The `50% 40%` fallback (before the first
+   mousemove fires, or with JS disabled) keeps it looking intentional, not
+   broken, in that split second.
+
+   Sized/opacity-tuned after checking real screenshots: a first pass (peak
+   alpha 0.85, radius 1100px) measured as only a ~3-4% brightness delta
+   between opposite cursor corners -- technically hue-neutral but too subtle
+   to read as deliberate rather than a screenshot artifact. Wider radius +
+   higher peak alpha (still fading to fully transparent, still pure white,
+   so it can't become "a visible color gradient") makes the moving light
+   actually legible without introducing any hue. */
 .stApp {{
     background-color: var(--vdx-background);
-    background-image:
-        radial-gradient(ellipse 900px 600px at 8% 0%, rgba(179, 97, 26, 0.07), transparent 60%),
-        radial-gradient(ellipse 900px 700px at 100% 100%, rgba(14, 124, 134, 0.08), transparent 60%);
+    background-image: radial-gradient(
+        circle 1500px at var(--vdx-mouse-x, 50%) var(--vdx-mouse-y, 40%),
+        rgba(255, 255, 255, 1) 0%,
+        rgba(255, 255, 255, 0) 75%
+    );
     background-attachment: fixed;
 }}
 
@@ -466,14 +479,29 @@ div[data-testid="stButtonGroup"] button {{
 
 /* Result sections fade/slide in gently as they're revealed -- scoped via
    st.container(key=...)'s stable "st-key-<key>" class, so a whole section
-   animates as one unit rather than each metric tile animating separately. */
+   animates as one unit rather than each metric tile animating separately.
+
+   Deliberately NOT `animation-fill-mode: both` -- confirmed live that a
+   fill-mode of "both"/"forwards" here breaks Streamlit's image fullscreen
+   view: as long as a (possibly finished) CSS animation is still holding an
+   element at a keyframe that touches `transform` -- even the identity
+   transform, even spelled as `transform: none` in the keyframe itself --
+   Chromium keeps treating the element as transformed and gives it a
+   containing block for `position: fixed` descendants. Streamlit's
+   fullscreen image overlay IS `position: fixed` and expects the viewport
+   as its containing block; with fill-mode "both" it was instead getting
+   trapped inside this small section card. Default fill-mode ("none")
+   avoids the whole class of bug: once the 0.4s animation ends, the
+   element fully reverts to its un-animated base style (no transform, full
+   opacity already the default here), same visual end state, nothing left
+   "holding" a transform. */
 [class*="st-key-vdx-section-"] {{
-    animation: vdxFadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation: vdxFadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }}
 
 @keyframes vdxFadeInUp {{
     from {{ opacity: 0; transform: translateY(10px); }}
-    to {{ opacity: 1; transform: translateY(0); }}
+    to {{ opacity: 1; transform: none; }}
 }}
 
 .vdx-error-card {{
@@ -567,3 +595,56 @@ div[data-testid="stButtonGroup"] button {{
 def inject_css() -> None:
     """Call once near the top of the page, before any other widgets."""
     st.markdown(_CSS, unsafe_allow_html=True)
+
+
+# Registered once at import time (not inside a function called per-render --
+# see CCv2 docs: re-registering a component name mid-session logs a warning
+# and can cause confusing behavior). This component renders no visible
+# markup; its only job is the JS side effect below.
+_AMBIENT_CURSOR = st.components.v2.component(
+    "vdx_ambient_cursor",
+    js="""
+export default function (component) {
+    // Lerp toward the cursor rather than snapping straight to it -- an
+    // "ambient light drifting to follow you" read, not a background that
+    // visibly jumps on every mouse tick. 50/40 matches the CSS fallback
+    // in theme.py's .stApp rule (upper-middle glow before the first
+    // mousemove event fires).
+    let targetX = 50, targetY = 40;
+    let curX = 50, curY = 40;
+    let rafId = null;
+
+    const onMove = (e) => {
+        targetX = (e.clientX / window.innerWidth) * 100;
+        targetY = (e.clientY / window.innerHeight) * 100;
+    };
+    window.addEventListener("mousemove", onMove);
+
+    const tick = () => {
+        curX += (targetX - curX) * 0.06;
+        curY += (targetY - curY) * 0.06;
+        document.documentElement.style.setProperty("--vdx-mouse-x", curX.toFixed(2) + "%");
+        document.documentElement.style.setProperty("--vdx-mouse-y", curY.toFixed(2) + "%");
+        rafId = requestAnimationFrame(tick);
+    };
+    tick();
+
+    // Streamlit reruns can remount this component; tearing down the old
+    // listener/loop here (the documented CCv2 cleanup pattern) keeps a
+    // rerun-heavy session from stacking up duplicate mousemove listeners
+    // and rAF loops racing each other.
+    return () => {
+        window.removeEventListener("mousemove", onMove);
+        if (rafId) cancelAnimationFrame(rafId);
+    };
+}
+""",
+)
+
+
+def inject_ambient_cursor() -> None:
+    """Call once per page load, anywhere after inject_css(). Pure JS side
+    effect (see _AMBIENT_CURSOR above) -- no visible output, no return
+    value used.
+    """
+    _AMBIENT_CURSOR()
