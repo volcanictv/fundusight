@@ -136,25 +136,27 @@ careful attempt failed *worse* than the first. Ground-truth CDR
 (disease-severity proxy) is comparable across splits, so this is a
 camera/domain issue, not a severity-composition one.
 
-Fix in progress: `optic_disc_dataset.build_pooled_pairs()`/
-`split_pooled_pairs()` now pool all 1200 REFUGE2 images and re-split with
+Fix applied: `optic_disc_dataset.build_pooled_pairs()`/
+`split_pooled_pairs()` pool all 1200 REFUGE2 images and re-split with
 stratification by original folder, so every new split gets a
 proportional mix of all three camera domains; `optic_disc_train.py`
-trains on this pooled split by default. A 1-epoch smoke test on the new
-pipeline completed cleanly (train/val/test batch counts matching the new
-~840/180/180 split, no runtime errors). **Retraining the production
-checkpoint on the pooled split is still outstanding** — deliberately not
-run yet (compute not committed). The current `checkpoints/
-optic_disc_unet.pth` in README was trained on the old, domain-split data
-and should be treated as provisional until the retrain runs and its
-held-out numbers (from the new, domain-mixed test split) are reported here.
+trains on this pooled split by default. **Retrain complete** (2026-07-11,
+80 epochs, pooled/re-split data: train=840 val=180 test=180): held-out
+test Dice — `dice_rim=0.8937  dice_cup=0.8576  mean=0.8756` — vs. the old
+domain-split checkpoint's held-out test Dice of `dice_rim=0.6696
+dice_cup=0.4502  mean=0.5599`. The large jump (especially on the cup
+class) confirms the camera/domain split, not model capacity, was the
+bottleneck. `checkpoints/optic_disc_unet.pth` now holds the pooled-split
+weights; the prior domain-split checkpoint is kept at
+`checkpoints/optic_disc_unet.provisional_domainsplit.pth` for reference/
+comparison, not used by inference.
 
 **Done when:** disc mask, cup mask, and macula location are overlaid on a
 sample image, a vertical cup-disc ratio is printed alongside them, the
 cup-within-disc structural check passes (verified by a test), the
 production model is retrained on the pooled/re-split data, and a
 held-out test-split Dice score (from that new split) is reported for the
-disc/cup segmentation model.
+disc/cup segmentation model. **Status: done** — see retrain results above.
 
 ## Phase 7 — Multi-disease + Multi-dataset (weeks 9-11)
 

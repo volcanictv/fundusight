@@ -4,7 +4,7 @@ AI-assisted retinal disease analysis pipeline (fundus photo → quality check �
 
 See ROADMAP.md for the full phased plan. Update the "Current phase" line below as you progress.
 
-**Current phase:** Phase 8/9 done — PDF report generation (`src/report/`) + Streamlit dashboard (`src/app/`). Phase 6's optic-disc/cup retrain on the pooled/re-split REFUGE2 data is still parked (see ROADMAP.md's Phase 6 "Known issue"), and Phase 7 (multi-disease) hasn't been started.
+**Current phase:** Phase 8/9 done — PDF report generation (`src/report/`) + Streamlit dashboard (`src/app/`). Phase 6 is now done — the optic-disc/cup U-Net has been retrained on the pooled/re-split REFUGE2 data (2026-07-11): held-out test Dice `dice_rim=0.8937 dice_cup=0.8576 mean=0.8756`, up from the old domain-split checkpoint's `mean=0.5599` (see ROADMAP.md's Phase 6). Phase 7 (multi-disease) hasn't been started.
 
 **Known issue — dashboard visual design is a first pass, not final:** the current look (bento cards, ring/pill/data-grid components in `src/app/components.py`, Inter/JetBrains Mono typography, `src/app/theme.py`'s CSS) is a functional, verified-working iteration, not a finished design. It still needs a real design pass — spacing/hierarchy consistency across sections, mobile/narrow-viewport behavior (never checked, the app was only verified at desktop widths), and a general polish pass beyond "the individual pieces work" — before treating the visual layer as done the way the underlying pipeline/report logic is.
 
