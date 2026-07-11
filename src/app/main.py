@@ -131,15 +131,20 @@ def render_quality_section(quality: dict) -> None:
 
 
 def render_preprocessing_section(preview: dict) -> None:
-    # Only the "after" image at this density -- the original is still one
-    # tap away in the Image Comparison viewer below, so showing both here
-    # too would just repeat it.
+    # Side-by-side before/after -- a single "after" image (this tile's
+    # shape before the Report Preview merge) meant the only way to actually
+    # compare original vs. preprocessed was flipping between two pills in
+    # Image Comparison one at a time, with nothing to hold the earlier
+    # frame against. Showing both here restores a simultaneous comparison
+    # without bringing back a full duplicate walk -- Image Comparison still
+    # covers the same two images individually at full size for closer
+    # inspection, this is just the side-by-side "what changed" view.
     _tile_label("Preprocessing")
-    st.image(
-        _to_rgb(preview["after"]),
-        caption="Illumination + CLAHE + color normalization",
-        width="stretch",
-    )
+    before_col, after_col = st.columns(2)
+    with before_col:
+        st.image(_to_rgb(preview["before"]), caption="Original", width="stretch")
+    with after_col:
+        st.image(_to_rgb(preview["after"]), caption="Illumination + CLAHE + color norm.", width="stretch")
 
 
 def render_detection_section(detection: dict | None, cam_overlay) -> None:
@@ -161,6 +166,13 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
     # rather than forcing every disease tile into an identical shape.
     with st.expander("Severity breakdown"):
         st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
+        if cam_overlay is not None:
+            # The tile itself only ever showed the pill+ring+chart -- the
+            # actual Grad-CAM heatmap lives in Image Comparison further
+            # down the page (see render_image_comparison()), with nothing
+            # on this tile pointing there. A one-line cross-reference beats
+            # making the reader already know it moved.
+            st.caption('Grad-CAM overlay: see "Grad-CAM (DR)" in Image Comparison below.')
 
 
 def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
@@ -185,6 +197,8 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         st.plotly_chart(
             binary_probability_chart(glaucoma, GLAUCOMA_LABELS), width="stretch", config={"displayModeBar": False}
         )
+        if cam_overlay is not None:
+            st.caption('Grad-CAM overlay: see "Grad-CAM (Glaucoma)" in Image Comparison below.')
 
 
 def render_amd_section(amd: dict | None, cam_overlay) -> None:
@@ -203,6 +217,8 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
     )
     with st.expander("Detection breakdown"):
         st.plotly_chart(binary_probability_chart(amd, AMD_LABELS), width="stretch", config={"displayModeBar": False})
+        if cam_overlay is not None:
+            st.caption('Grad-CAM overlay: see "Grad-CAM (AMD)" in Image Comparison below.')
 
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
