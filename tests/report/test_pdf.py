@@ -27,6 +27,20 @@ def _minimal_pipeline_result():
             "class_idx": 1,
         },
         "cam_overlay": image,
+        "glaucoma": {
+            "label": "Glaucoma Signs Present",
+            "probability": 0.55,
+            "probabilities": [0.45, 0.55],
+            "class_idx": 1,
+        },
+        "glaucoma_cam_overlay": image,
+        "amd": {
+            "label": "No AMD Signs",
+            "probability": 0.8,
+            "probabilities": [0.8, 0.2],
+            "class_idx": 0,
+        },
+        "amd_cam_overlay": image,
         "vessels": {
             "vessel_density": 10.0,
             "branch_count": 3,
@@ -68,6 +82,19 @@ def test_generate_pdf_handles_missing_detection():
     result = _minimal_pipeline_result()
     result["detection"] = None
     result["cam_overlay"] = None
+    content = build_report_content(result)
+
+    pdf_bytes = generate_pdf(content)
+
+    assert pdf_bytes.startswith(b"%PDF")
+
+
+def test_generate_pdf_handles_missing_glaucoma_and_amd():
+    result = _minimal_pipeline_result()
+    result["glaucoma"] = None
+    result["glaucoma_cam_overlay"] = None
+    result["amd"] = None
+    result["amd_cam_overlay"] = None
     content = build_report_content(result)
 
     pdf_bytes = generate_pdf(content)

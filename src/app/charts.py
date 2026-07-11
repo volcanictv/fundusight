@@ -3,14 +3,10 @@
 Severity is ORDINAL (swapping the class order would change its meaning),
 not nominal categorical identity -- per the dataviz skill's color-formula.md
 this takes a single one-hue ramp with monotone lightness, not the
-categorical eight-hue palette. The ramp below is this app's own accent blue
-(#0071E3, matching theme.py / report/pdf.py) stepped light->dark and
-validated with the skill's ordinal checks rather than eyeballed:
-
-    node scripts/validate_palette.js "#78B3EF,#4698EA,#197FE6,#0369CF,#0C4E91" \
-        --mode light --surface "#FBFBFD" --ordinal
-    -> ALL CHECKS PASS (monotone L, adjacent dL >= 0.06, light-end contrast
-       2.14:1, single hue, hue spread 6 degrees)
+categorical eight-hue palette. The ramp below is this app's own primary
+accent teal (--vdx-teal, #0E7C86 -- see theme.py's module docstring for why
+teal replaced the old flat blue in the glass redesign) stepped light->dark,
+same single-hue/monotone-lightness shape as the ramp it replaces.
 
 A single "series" (the probability distribution) needs no legend box per
 the same reference -- identity here comes from the y-axis category labels,
@@ -24,11 +20,11 @@ import plotly.graph_objects as go
 
 from src.detection.model import SEVERITY_LABELS
 
-_ORDINAL_RAMP = ["#78B3EF", "#4698EA", "#197FE6", "#0369CF", "#0C4E91"]
+_ORDINAL_RAMP = ["#8FD0D6", "#5CB8C0", "#2C9CA6", "#0E7C86", "#0A5960"]
 
-_PRIMARY_INK = "#1D1D1F"
-_MUTED_INK = "#6E6E73"
-_GRIDLINE = "#D2D2D7"
+_PRIMARY_INK = "#1A1D23"
+_MUTED_INK = "#5F6570"
+_GRIDLINE = "#DCE0E7"
 
 
 def probability_bar_chart(detection: dict) -> go.Figure:

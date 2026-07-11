@@ -24,6 +24,8 @@ _STAGE_LABELS = {
     "quality": "Checking image quality",
     "preprocessing": "Preprocessing",
     "detection": "Detecting diabetic retinopathy",
+    "glaucoma": "Detecting glaucoma signs",
+    "amd": "Detecting AMD signs",
     "vessels": "Analyzing vessels",
     "optic_disc": "Analyzing optic disc",
 }

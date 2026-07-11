@@ -17,6 +17,8 @@ walking these sections.
 from dataclasses import dataclass, field
 from typing import Any
 
+from src.detection.amd_infer import AMD_LABELS
+from src.detection.glaucoma_infer import GLAUCOMA_LABELS
 from src.detection.model import SEVERITY_LABELS
 from src.report import overlays
 
@@ -57,6 +59,28 @@ _SEVERITY_RECOMMENDATIONS = {
 # the literature; treated here purely as a talking point, not a threshold
 # this project claims clinical validity for.
 _ELEVATED_CDR_THRESHOLD = 0.5
+
+# Same non-diagnostic phrasing convention as _SEVERITY_RECOMMENDATIONS
+# above, keyed by class_idx (0=absent, 1=present) matching
+# glaucoma_infer.GLAUCOMA_LABELS / amd_infer.AMD_LABELS. Deliberately does
+# NOT repeat "educational observation only, not a diagnosis" per finding --
+# when multiple findings are positive in one report (DR + glaucoma + AMD +
+# an elevated-CDR note), that meta-caveat stacking up to 3-4 times in one
+# paragraph is itself the repetition problem; the single DISCLAIMER
+# appended once at the end of every recommendation already carries that
+# framing (see _build_recommendation()), so each finding sentence below
+# only needs to state the finding itself.
+_GLAUCOMA_RECOMMENDATIONS = {
+    0: "The automated glaucoma estimate found no signs of glaucoma in this image.",
+    1: "The automated glaucoma estimate suggests glaucoma signs may be present; further review may be warranted.",
+}
+_AMD_RECOMMENDATIONS = {
+    0: "The automated AMD estimate found no signs of age-related macular degeneration in this image.",
+    1: (
+        "The automated AMD estimate suggests signs of age-related macular "
+        "degeneration may be present; further review may be warranted."
+    ),
+}
 
 
 @dataclass
@@ -119,6 +143,30 @@ def _detection_sections(detection: dict | None, cam_overlay) -> list[Section]:
     return sections
 
 
+def _binary_classifier_sections(
+    title: str, detection: dict | None, cam_overlay, labels: dict, unavailable_text: str
+) -> list[Section]:
+    """Shared by the glaucoma and AMD sections -- unlike DR's 5-class
+    _detection_sections(), both are genuinely identical in shape (binary
+    label, same probability/table/optional-CAM layout), so factoring the
+    two into one function here is justified rather than premature.
+    """
+    if detection is None:
+        return [Section(title=title, kind="text", body=unavailable_text)]
+
+    headers = ["Finding", "Probability"]
+    rows = [[labels[i], f"{p * 100:.1f}%"] for i, p in enumerate(detection["probabilities"])]
+    top_line = f"Top estimate: {detection['label']} ({detection['probability'] * 100:.1f}% confidence)"
+    sections = [
+        Section(title=title, kind="text", body=top_line),
+        Section(title=f"{title} Probabilities", kind="table", body={"headers": headers, "rows": rows}),
+    ]
+    if cam_overlay is not None:
+        cam_images = [{"caption": "Grad-CAM attention map", "array": cam_overlay}]
+        sections.append(Section(title=f"{title} Explainability", kind="image", body=cam_images))
+    return sections
+
+
 def _vessel_section(vessels_result: dict, working_image) -> Section:
     rows = [
         ("Vessel density", f"{vessels_result['vessel_density']:.2f}%"),
@@ -152,7 +200,9 @@ def _optic_disc_section(optic_disc_result: dict, working_image) -> Section:
     )
 
 
-def _build_recommendation(quality: dict, detection: dict | None, optic_disc_result: dict) -> str:
+def _build_recommendation(
+    quality: dict, detection: dict | None, glaucoma: dict | None, amd: dict | None, optic_disc_result: dict
+) -> str:
     parts = []
     if not quality["passed"]:
         parts.append(
@@ -169,13 +219,42 @@ def _build_recommendation(quality: dict, detection: dict | None, optic_disc_resu
     else:
         parts.append(_SEVERITY_RECOMMENDATIONS[detection["class_idx"]])
 
-    if optic_disc_result["disc_found"] and optic_disc_result["vertical_cdr"] >= _ELEVATED_CDR_THRESHOLD:
+    if glaucoma is None:
+        parts.append("No glaucoma estimate is available for this image (glaucoma model not loaded).")
+    else:
+        parts.append(_GLAUCOMA_RECOMMENDATIONS[glaucoma["class_idx"]])
+
+    if amd is None:
+        parts.append("No AMD estimate is available for this image (AMD model not loaded).")
+    else:
+        parts.append(_AMD_RECOMMENDATIONS[amd["class_idx"]])
+
+    cdr_elevated = optic_disc_result["disc_found"] and optic_disc_result["vertical_cdr"] >= _ELEVATED_CDR_THRESHOLD
+    if cdr_elevated:
+        # No repeated "educational observation only, not a diagnosis" here
+        # either -- see the module-level comment above _GLAUCOMA_
+        # RECOMMENDATIONS for why; the disclaimer at the end already
+        # covers it once.
         parts.append(
             f"The estimated vertical cup-to-disc ratio "
             f"({optic_disc_result['vertical_cdr']:.2f}) is on the higher end "
-            f"of the typical range — an educational observation only, "
-            f"not a glaucoma diagnosis."
+            f"of the typical range."
         )
+
+    # Two independent glaucoma-relevant signals now exist on this report
+    # (the CDR threshold above and the glaucoma classifier). Surface it
+    # explicitly when they point different directions rather than leaving
+    # the reader to notice the tension themselves -- both are approximate
+    # estimates, neither should silently override the other.
+    if optic_disc_result["disc_found"] and glaucoma is not None:
+        classifier_flags_glaucoma = glaucoma["class_idx"] == 1
+        if cdr_elevated != classifier_flags_glaucoma:
+            parts.append(
+                "Note: the cup-to-disc ratio observation and the glaucoma "
+                "classifier's estimate point in different directions for "
+                "this image — both are approximate, independent signals; "
+                "neither should be treated as a confirmed finding on its own."
+            )
 
     parts.append(DISCLAIMER)
     return " ".join(parts)
@@ -191,13 +270,33 @@ def build_report_content(pipeline_result: dict) -> ReportContent:
         _quality_section(pipeline_result["quality"]),
         _preprocessing_section(pipeline_result["preprocessing_preview"]),
         *_detection_sections(pipeline_result["detection"], pipeline_result["cam_overlay"]),
+        *_binary_classifier_sections(
+            "Glaucoma Detection",
+            pipeline_result["glaucoma"],
+            pipeline_result["glaucoma_cam_overlay"],
+            GLAUCOMA_LABELS,
+            "The glaucoma detection model is not available in this build — "
+            "no trained checkpoint was found.",
+        ),
+        *_binary_classifier_sections(
+            "Age-Related Macular Degeneration (AMD) Detection",
+            pipeline_result["amd"],
+            pipeline_result["amd_cam_overlay"],
+            AMD_LABELS,
+            "The AMD detection model is not available in this build — no "
+            "trained checkpoint was found.",
+        ),
         _vessel_section(pipeline_result["vessels"], working_image),
         _optic_disc_section(pipeline_result["optic_disc"], working_image),
         Section(
             title="Recommendation",
             kind="text",
             body=_build_recommendation(
-                pipeline_result["quality"], pipeline_result["detection"], pipeline_result["optic_disc"]
+                pipeline_result["quality"],
+                pipeline_result["detection"],
+                pipeline_result["glaucoma"],
+                pipeline_result["amd"],
+                pipeline_result["optic_disc"],
             ),
         ),
     ]

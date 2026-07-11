@@ -170,12 +170,56 @@ bias, unlike the old domain-split checkpoint (whose cup Dice of 0.45 would
 have made its CDR unreliable, consistent with why the earlier calibration
 attempts in this section failed).
 
+**Macula/fovea heuristic validated against real ground truth for the first
+time (2026-07-12) — result: unreliable, root cause identified.**
+`locate_macula_classical()` had only ever been sanity-checked as "looks
+about right relative to the disc," since REFUGE2 (its own training/eval
+dataset) ships no fovea coordinate labels. ADAM does
+(`Fovea_location.xlsx`, one (Fovea_X, Fovea_Y) per image), so
+`scripts/evaluate_macula_localization.py` runs Stage 6.1's classical disc
+localizer + the macula heuristic on all 400 ADAM Training400 images and
+compares against it — converting predicted working-image-space coordinates
+back to each image's own *original* pixel space first (ADAM ships two
+different native resolutions, 2056x2124 and 1444x1444, so a fixed scale
+factor would silently corrupt part of the comparison; same per-image-actual-
+dimensions convention `evaluate_optic_disc_full_pipeline.py` and
+`vessels._resize_to_working_width()` already use).
+
+```
+Raw Euclidean pixel error (original pixel space):     mean=634.6px  median=485.3px
+Disc-diameter-normalized error:                        mean=3.679   median=3.327
+Percentiles (normalized): p10=0.273 p25=0.988 p50=3.327 p75=5.942 p90=7.194 p95=8.125 p99=9.733 max=18.220
+```
+
+The heuristic's own docstring already admits it: "no reliable eye-laterality
+info available," so it tries both sides of the disc and picks whichever is
+darker. That guess is the dominant error source, confirmed by a side-of-disc
+breakdown: it picks the **correct side in only 229/400 images (57%)** —
+barely better than a coin flip — and all 10 worst outliers (9-18 disc
+diameters of error) are wrong-side picks. Even restricted to the 229
+correct-side images, median normalized error is still 1.318 disc diameters
+— a real miss, not just noise, so the "darkest point in the window" logic
+itself is imprecise even when pointed the right direction (plausibly pulled
+off-target by vessels or, on the 89 true-AMD images specifically, AMD
+lesions — which are themselves dark, macula-adjacent, and exactly what
+Stage 6.1/6.2 were never trained to distinguish from the fovea). This is the
+concrete version of the risk the heuristic's docstring already flagged in
+the abstract: it was tuned/eyeballed only on REFUGE2-like framing and
+degrades outside it. Not fixed here — this is a validation result, not a
+fix; a real fix would need either eye-laterality metadata (not available in
+REFUGE2 or ADAM) or a learned macula localizer, which no available dataset
+currently has the labels to train.
+
 **Done when:** disc mask, cup mask, and macula location are overlaid on a
 sample image, a vertical cup-disc ratio is printed alongside them, the
 cup-within-disc structural check passes (verified by a test), the
 production model is retrained on the pooled/re-split data, and a
 held-out test-split Dice score (from that new split) is reported for the
 disc/cup segmentation model. **Status: done** — see retrain results above.
+The macula/fovea heuristic itself is now known to be unreliable outside
+REFUGE2-like framing (see validation above) — worth flagging in the app/
+report if macula location is ever surfaced as more than an approximate
+overlay.
 
 ## Phase 7 — Multi-disease + Multi-dataset (weeks 9-11)
 
@@ -225,29 +269,118 @@ RETFound stretch goal mentioned below). Tests: `tests/detection/test_glaucoma_da
 
 Real-data split (verified 2026-07-11): 998 pooled labeled pairs → train=698,
 val=150, test=150, all three REFUGE2 camera domains represented in every
-split. A 1-epoch smoke test (GPU: RTX 4060) confirmed the full pipeline runs
-correctly end-to-end: epoch wall-clock 14.0s, val AUC 0.674, test AUC 0.679
-(weak — expected for 1 epoch, not a real result).
-`checkpoints/glaucoma_efficientnet_b0.pth` currently holds that 1-epoch
-smoke-test checkpoint, **not a trained model** — it'll be overwritten by a
-real run.
+split.
 
-**To resume training from a fresh session, just run:**
+**Real 30-epoch training run completed (2026-07-11, GPU: RTX 4060, ~5.5 min
+total).** Model selection is by validation AUC-ROC per epoch; the best
+checkpoint was reached at **epoch 6/30** (val AUC 0.7271) — after that, train
+loss kept falling (0.40 → 0.10) while val AUC plateaued/declined, a clear
+overfitting signal on the small 150-image validation split, so the later
+epochs' weights were correctly never selected. Held-out **test set** results
+(never touched during training or model selection):
+
+```
+accuracy=0.7400  auc=0.8304  f1=0.4179  sensitivity=0.7778  specificity=0.7348
+confusion matrix (rows=true, cols=predicted):
+[[97 35]   TN=97 FP=35
+ [ 4 14]]  FN=4  TP=14
+```
+
+Sensitivity (77.8%) is notably higher than accuracy would suggest — the
+inverse-frequency class-weighted loss trades precision (more false positives,
+35) for fewer missed glaucoma cases (only 4 false negatives out of 18
+positives), which is the appropriate tradeoff for a screening task. Test AUC
+(0.8304) exceeding the best val AUC (0.7271) is plausible given how small and
+noisy both splits are (150 images each, ~12% positive).
+`checkpoints/glaucoma_efficientnet_b0.pth` now holds this real, fully-trained
+checkpoint (not a smoke test).
+
+**To retrain from a fresh session:**
 ```
 .venv\Scripts\python.exe src\detection\glaucoma_train.py --epochs 30
 ```
-(30 is the script's default — override with `--epochs N` if a different
-budget is wanted; this hasn't been run for real yet, so there's no existing
-loss/AUC curve to compare against). Once done, evaluate the printed held-out
-test metrics (accuracy/AUC/F1/sensitivity/specificity) and update this
-section + `CLAUDE.md`'s "Current phase" line with the results, same as every
-other phase in this file.
+(30 is the script's default — override with `--epochs N` for a different
+budget; compare against the epoch-6 val AUC of 0.7271 / test AUC of 0.8304
+above).
 
-**Not started:** AMD classifier (will follow the same `build_model()`/
-`build_transforms()` pattern once ADAM's train/val/test split is carved out),
-IDRiD DR cross-validation (evaluation only, no training — run the existing
-`checkpoints/dr_efficientnet_b0.pth` against `data/IDRi/` and report how
-accuracy/AUC/kappa transfer).
+**AMD classifier — trained (2026-07-12, GPU: RTX 4060, ~2 min total).**
+Architecture: EfficientNet-B0, same `build_model()`/`build_transforms()`
+pattern as DR and glaucoma. Labels come straight from ADAM's own folder
+structure — `Training400/AMD/` (89 images, label 1) vs `Training400/Non-AMD/`
+(311 images, label 0) — no separate CSV needed. Since ADAM (unlike REFUGE2)
+is a single camera domain, `src/detection/amd_dataset.py`'s `split_pairs()`
+stratifies on the AMD/Non-AMD label alone (no domain-compound key needed).
+Code: `src/detection/amd_dataset.py` + `src/detection/amd_train.py` (mirrors
+`glaucoma_train.py`'s structure exactly). Tests: `tests/detection/test_amd_dataset.py`
+(5 tests, passing).
+
+Real-data split: 400 labeled images → train=279, val=61, test=60 (carved out
+ourselves since ADAM ships no official val/test — same pooling-fix pattern as
+REFUGE2's Phase 6 and Phase 7's glaucoma split). Val AUC climbed steadily
+across all 30 epochs (0.6398 → 0.9666) with no overfitting plateau — unlike
+glaucoma's early epoch-6 peak, this is a cleaner training curve, likely
+because AMD/Non-AMD is a more visually separable task than glaucoma cup/disc
+subtleties, and/or ADAM's images are more homogeneous (single domain vs
+REFUGE2's three). Best checkpoint landed at **epoch 30/30** (val AUC 0.9666).
+Held-out **test set** results (never touched during training or model
+selection):
+
+```
+accuracy=0.9167  auc=0.8887  f1=0.8000  sensitivity=0.7692  specificity=0.9574
+confusion matrix (rows=true, cols=predicted):
+[[45  2]   TN=45 FP=2
+ [ 3 10]]  FN=3  TP=10
+```
+
+`checkpoints/amd_efficientnet_b0.pth` holds this real, fully-trained
+checkpoint. To retrain: `.venv\Scripts\python.exe src\detection\amd_train.py --epochs 30`.
+
+**IDRiD DR cross-dataset validation — done (2026-07-12), evaluation only, no
+training.** Runs the existing APTOS-trained `checkpoints/dr_efficientnet_b0.pth`
+unmodified against IDRiD (`data/IDRi/`, 455 images, both IDRiD's official
+train and test sets pooled — see `src/detection/idrid_dataset.py`'s docstring
+for how the "test"-suffixed id_codes disambiguate IDRiD's own restarted
+numbering). IDRiD uses the same 0-4 ICDR severity scale as APTOS, so class
+indices transfer directly with no relabeling. Code:
+`src/detection/idrid_dataset.py` (a small standalone loader, not a reuse of
+`AptosDataset` — IDRiD ships JPEGs not PNGs, and its CSV carries extra
+unnamed columns) + `src/detection/idrid_eval.py` (reuses `train.py`'s
+`evaluate()` and `dataset.py`'s `build_transforms()` directly — no
+metric-computation duplication). Tests: `tests/detection/test_idrid_dataset.py`
+(3 tests, passing). Run with:
+```
+.venv\Scripts\python.exe src\detection\idrid_eval.py
+```
+
+**Results — the whole point of this exercise, a real generalization gap:**
+
+```
+                APTOS (in-domain, from README.md)   IDRiD (cross-dataset)
+accuracy        83.9%                                54.3%
+AUC (macro ovr) 0.925                                0.840
+kappa (quad.)   0.889                                0.764
+```
+
+Confusion matrix (IDRiD, rows=true, cols=predicted):
+```
+[[ 73  46  10   0   0]
+ [  4  16   2   0   0]
+ [  4  20 118   6   8]
+ [  0   1  59  13  11]
+ [  0   0  23  14  27]]
+```
+
+Raw accuracy drops ~30 points out-of-domain, but AUC (0.840) and quadratic
+weighted kappa (0.764, still "substantial agreement" on the Landis-Koch
+scale) hold up much better — kappa in particular discounts near-miss errors
+(e.g. predicting severity 2 for a true 3), and the confusion matrix shows
+most of IDRiD's errors are exactly that kind of adjacent-class confusion,
+not wild misses. This is the demonstration the roadmap called for: a
+single-dataset accuracy number is weak evidence of real-world performance,
+and the degradation pattern (ranking/ordinal signal surviving better than
+hard classification accuracy) is itself informative about what a fundus-photo
+domain shift (different camera hardware, population, lighting) does to a
+CNN classifier.
 
 **Stretch goal reminder (not a Phase 7 blocker):** later, add RETFound
 (ViT-Large, MAE-pretrained on retinal images) as a comparison arm against
@@ -257,7 +390,28 @@ build it yet, but the glaucoma classifier code above was deliberately kept
 model-agnostic (`build_model(num_classes=...)` as the only task-specific
 call) so RETFound can slot in later without a rewrite.
 
-**Done when:** you have probability scores for all three diseases from one uploaded image.
+**Glaucoma + AMD wired into inference and the app (2026-07-12).** Both
+classifiers were trained but only reachable via their training scripts
+until now. `src/detection/glaucoma_infer.py` / `amd_infer.py` mirror
+`infer.py`'s `load_model()`/`predict()` contract exactly. `report/pipeline.py`
+runs all three classifiers (DR/glaucoma/AMD) through one shared
+`_run_classifier()` helper (each gets its own Grad-CAM overlay, same as DR)
+and `STAGE_NAMES` now includes `"glaucoma"`/`"amd"`. `report/content.py`
+gained a shared `_binary_classifier_sections()` (glaucoma and AMD are
+identical in shape, unlike DR's 5-class layout) plus a **disagreement
+check**: the optic-disc section's existing elevated-CDR observation and the
+new glaucoma classifier are now two independent glaucoma-relevant signals
+on the same report, so the Recommendation text explicitly flags it when
+they point different directions rather than silently favoring one. No
+changes were needed to `report/pdf.py` or `app/render_preview.py` — both
+are already `Section.kind`-driven and disease-agnostic, confirming that
+architecture choice paid off. Verified end-to-end in the real running app
+(not just tests): both sections render correctly with real predictions,
+correct pill colors, and Grad-CAM overlays; the disagreement note correctly
+appears/doesn't appear depending on whether the two signals agree; the
+downloaded PDF includes both new sections.
+
+**Done when:** you have probability scores for all three diseases from one uploaded image. **Status: done.**
 
 ## Phase 8 — Report Generation (week 11-12)
 

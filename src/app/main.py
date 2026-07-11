@@ -1,16 +1,23 @@
-"""Phase 9: Streamlit dashboard.
+"""Phase 9 / redesign: Streamlit dashboard.
 
 Ties every pipeline stage together: upload (or demo mode) -> quality ->
-preprocessing preview -> DR detection + Grad-CAM -> vessel biomarkers ->
-optic disc/cup/CDR -> an in-app report preview -> PDF download.
+preprocessing preview -> DR/glaucoma/AMD detection + Grad-CAM each ->
+vessel biomarkers -> optic disc/cup/CDR -> an in-app report preview -> PDF
+download.
 
-v2: the pipeline runs progressively, not behind one opaque spinner. Each
-result section renders the moment its stage finishes (via
-report/pipeline.run_pipeline()'s on_stage callback), behind a sticky
-progress banner that stays pinned to the viewport regardless of scroll
-position, with skeleton placeholders filling the whole results area
-immediately so a scrolled-down user sees "this is loading," never a blank
-gap that reads as broken. See app/progress.py.
+Redesign pass: the page is now a dense multi-column dashboard instead of
+seven full-width stacked sections. Three ROW groups (Overview / Disease
+Screening / Biomarkers) each hold their stages side by side in columns.
+The Disease Screening row in particular replaces what used to be three
+near-identical full sections (subheader + pill + ring + datagrid +
+full-size Grad-CAM image, once each for DR/glaucoma/AMD) with three
+compact tiles -- the Grad-CAM images moved to the existing Image Comparison
+viewer at the bottom instead of repeating three times inline.
+
+v2 (kept): the pipeline runs progressively, not behind one opaque spinner.
+Each stage still gets its own st.empty() placeholder, filled the moment it
+finishes (via report/pipeline.run_pipeline()'s on_stage callback), behind a
+sticky progress banner. See app/progress.py.
 
 Run with (from the repo root, matching this project's Windows venv
 convention -- see README):
@@ -24,6 +31,7 @@ checkpoint (see ROADMAP.md's Phase 6 note) needs no changes on this page.
 """
 
 import hashlib
+import html
 import re
 
 import cv2
@@ -31,7 +39,7 @@ import numpy as np
 import streamlit as st
 
 from src.app.charts import probability_bar_chart
-from src.app.components import render_datagrid, render_pill, render_ring
+from src.app.components import render_datagrid, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
 from src.app.render_preview import render_streamlit
@@ -44,6 +52,12 @@ from src.report.pipeline import run_pipeline
 
 st.set_page_config(page_title="VisionDx", page_icon="\U0001f441", layout="wide")
 inject_css()
+
+# CSS custom-property references, not hex literals -- theme.py's :root is
+# the single source of truth for these two accent colors; every caller here
+# just points at it rather than duplicating hex values.
+_TEAL = "var(--vdx-teal)"
+_COPPER = "var(--vdx-copper)"
 
 
 def _to_rgb(array: np.ndarray) -> np.ndarray:
@@ -59,31 +73,52 @@ def _safe_filename(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]+", "_", text).strip("_") or "report"
 
 
+def _tile_label(text: str) -> None:
+    # Reuses the same serif micro-heading style render_stat_tile()'s own
+    # title uses (see theme.py's .vdx-stat-tile-title) so every column in
+    # the dense grid below -- disease tiles included -- reads as one
+    # consistent family of "instrument readouts," not a mix of full
+    # st.subheader blocks and small ad-hoc labels.
+    st.markdown(f'<div class="vdx-stat-tile-title">{html.escape(text)}</div>', unsafe_allow_html=True)
+
+
+def _unavailable_tile(title: str) -> None:
+    st.markdown(
+        f'<div class="vdx-stat-tile"><div class="vdx-stat-tile-title">{html.escape(title)}</div>'
+        f'<div class="vdx-caption">Model not available in this build — no trained checkpoint was found.</div></div>',
+        unsafe_allow_html=True,
+    )
+
+
 # --- Per-section renderers. Each is exactly what used to be inline code
 # here before v2 -- extracted so both the progressive (cache-miss) and
 # direct (cache-hit) render paths below can call the same functions. ---
 
 
 def render_quality_section(quality: dict) -> None:
-    st.subheader("Image Quality")
-    cols = st.columns(3)
-    with cols[0]:
-        render_ring("Quality score", f"{quality['score']:.0f}", quality["score"])
-    with cols[1]:
-        render_ring("Focus", f"{quality['checks']['focus']['score']:.0f}", quality["checks"]["focus"]["score"])
-    with cols[2]:
-        render_ring("Exposure", f"{quality['checks']['exposure']['score']:.0f}", quality["checks"]["exposure"]["score"])
-    if quality["passed"]:
-        st.success("Image quality passed both checks.")
-    else:
-        st.warning("Image quality did not pass — findings below may be less reliable.")
+    _tile_label("Image Quality")
+    color = _TEAL if quality["passed"] else _COPPER
+    ring_col, grid_col = st.columns([1, 1])
+    with ring_col:
+        render_ring("Quality", f"{quality['score']:.0f}", quality["score"], color=color)
+    with grid_col:
+        render_datagrid(
+            [
+                ("Focus", f"{quality['checks']['focus']['score']:.0f}/100"),
+                ("Exposure", f"{quality['checks']['exposure']['score']:.0f}/100"),
+                ("Passed", "Yes" if quality["passed"] else "No"),
+            ]
+        )
+    if not quality["passed"]:
+        st.caption("Findings below may be less reliable — consider retaking the photo.")
 
 
 def render_preprocessing_section(preview: dict) -> None:
-    st.subheader("Preprocessing")
-    before_col, after_col = st.columns(2)
-    before_col.image(_to_rgb(preview["before"]), caption="Original", width="stretch")
-    after_col.image(
+    # Only the "after" image at this density -- the original is still one
+    # tap away in the Image Comparison viewer below, so showing both here
+    # too would just repeat it.
+    _tile_label("Preprocessing")
+    st.image(
         _to_rgb(preview["after"]),
         caption="Illumination + CLAHE + color normalization",
         width="stretch",
@@ -91,28 +126,63 @@ def render_preprocessing_section(preview: dict) -> None:
 
 
 def render_detection_section(detection: dict | None, cam_overlay) -> None:
-    header_col, pill_col = st.columns([4, 1])
-    with header_col:
-        st.subheader("Diabetic Retinopathy Detection")
     if detection is None:
-        st.info("Detection model not available in this build — no trained checkpoint was found at the expected path.")
+        _unavailable_tile("Diabetic Retinopathy")
         return
-    with pill_col:
-        # No-DR reads as "normal" (emerald); any positive finding gets the
-        # same "needs attention" amber treatment content.py's recommendation
-        # text already uses -- a status color, not a graded severity scale.
-        render_pill(detection["label"], "emerald" if detection["class_idx"] == 0 else "amber")
-    st.metric("Top estimate", detection["label"], f"{detection['probability'] * 100:.1f}% confidence")
-    st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
-    if cam_overlay is not None:
-        st.image(_to_rgb(cam_overlay), caption="Grad-CAM attention map", width="stretch")
+    variant = "normal" if detection["class_idx"] == 0 else "attention"
+    color = _TEAL if variant == "normal" else _COPPER
+    render_stat_tile(
+        "Diabetic Retinopathy",
+        detection["label"],
+        variant,
+        f"{detection['probability'] * 100:.0f}%",
+        detection["probability"] * 100,
+        ring_color=color,
+    )
+    # DR is 5-class (not binary like glaucoma/AMD) -- genuinely has more to
+    # show, so it alone gets an optional expander for the full distribution
+    # rather than forcing every disease tile into an identical shape.
+    with st.expander("Severity breakdown"):
+        st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
+
+
+def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
+    if glaucoma is None:
+        _unavailable_tile("Glaucoma")
+        return
+    variant = "normal" if glaucoma["class_idx"] == 0 else "attention"
+    color = _TEAL if variant == "normal" else _COPPER
+    render_stat_tile(
+        "Glaucoma",
+        glaucoma["label"],
+        variant,
+        f"{glaucoma['probability'] * 100:.0f}%",
+        glaucoma["probability"] * 100,
+        ring_color=color,
+    )
+
+
+def render_amd_section(amd: dict | None, cam_overlay) -> None:
+    if amd is None:
+        _unavailable_tile("AMD")
+        return
+    variant = "normal" if amd["class_idx"] == 0 else "attention"
+    color = _TEAL if variant == "normal" else _COPPER
+    render_stat_tile(
+        "AMD",
+        amd["label"],
+        variant,
+        f"{amd['probability'] * 100:.0f}%",
+        amd["probability"] * 100,
+        ring_color=color,
+    )
 
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
-    st.subheader("Vessel Biomarkers")
+    _tile_label("Vessel Biomarkers")
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
-        render_ring("Vessel density", f"{vessel_result['vessel_density']:.1f}%", vessel_result["vessel_density"])
+        render_ring("Density", f"{vessel_result['vessel_density']:.1f}%", vessel_result["vessel_density"], color=_TEAL)
     with grid_col:
         render_datagrid(
             [
@@ -129,11 +199,11 @@ def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> Non
 
 
 def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray) -> None:
-    st.subheader("Optic Disc / Cup / Macula")
+    _tile_label("Optic Disc / Cup / Macula")
     cdr = optic_disc_result["vertical_cdr"]
     # Same 0.5 elevated-CDR threshold report/content.py's recommendation
     # text already uses -- an educational observation, not a diagnosis.
-    ring_color = "#B45309" if cdr >= 0.5 else "#0071E3"
+    ring_color = _COPPER if cdr >= 0.5 else _TEAL
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
         render_ring("Vertical CDR", f"{cdr:.2f}", cdr * 100, color=ring_color)
@@ -164,7 +234,8 @@ def render_image_comparison(result: dict) -> None:
     handling -- not inert custom HTML buttons, which can't communicate
     back to Python without a full custom component). Reuses arrays
     already computed elsewhere in `result`/overlays.* rather than
-    recomputing anything.
+    recomputing anything. Now also the ONLY place Grad-CAM overlays are
+    shown at full size -- the disease tiles above no longer repeat them.
 
     Deliberately called only once the FULL pipeline result is available
     (see main flow below) rather than from inside on_stage -- some of
@@ -181,7 +252,11 @@ def render_image_comparison(result: dict) -> None:
         "Preprocessed": result["preprocessing_preview"]["after"],
     }
     if result["cam_overlay"] is not None:
-        images["Grad-CAM"] = result["cam_overlay"]
+        images["Grad-CAM (DR)"] = result["cam_overlay"]
+    if result["glaucoma_cam_overlay"] is not None:
+        images["Grad-CAM (Glaucoma)"] = result["glaucoma_cam_overlay"]
+    if result["amd_cam_overlay"] is not None:
+        images["Grad-CAM (AMD)"] = result["amd_cam_overlay"]
     images["Vessel mask"] = overlays.vessel_mask_overlay(result["working_image"], result["vessels"])
     images["Optic disc"] = overlays.optic_disc_overlay(result["working_image"], result["optic_disc"])
 
@@ -201,10 +276,56 @@ _SECTIONS = [
     ("quality", render_quality_section, lambda r: (r["quality"],)),
     ("preprocessing", render_preprocessing_section, lambda r: (r["preprocessing_preview"],)),
     ("detection", render_detection_section, lambda r: (r["detection"], r["cam_overlay"])),
+    ("glaucoma", render_glaucoma_section, lambda r: (r["glaucoma"], r["glaucoma_cam_overlay"])),
+    ("amd", render_amd_section, lambda r: (r["amd"], r["amd_cam_overlay"])),
     ("vessels", render_vessel_section, lambda r: (r["vessels"], r["working_image"])),
     ("optic_disc", render_optic_disc_section, lambda r: (r["optic_disc"], r["working_image"])),
 ]
 _RENDER_BY_STAGE = {stage: fn for stage, fn, _ in _SECTIONS}
+_EXTRACT_BY_STAGE = {stage: extract for stage, _, extract in _SECTIONS}
+
+# Visual grouping only -- pipeline.py's STAGE_NAMES/on_stage order is
+# unchanged, this just says which stages share one dashboard row and how
+# many columns that row gets. The repetition fix lives here: Disease
+# Screening puts what used to be three full-width sections into one row of
+# three compact tiles.
+_ROWS = [
+    ("Overview", ["quality", "preprocessing"]),
+    ("Disease Screening", ["detection", "glaucoma", "amd"]),
+    ("Biomarkers", ["vessels", "optic_disc"]),
+]
+
+
+def _create_stage_placeholders() -> dict:
+    """One st.empty() per stage, arranged into the _ROWS grid, filled
+    immediately with a skeleton -- same "whole results area shows loading
+    shape at once" goal as before, just laid out densely instead of
+    stacked full-width.
+    """
+    placeholders = {}
+    for title, stages in _ROWS:
+        st.subheader(title)
+        cols = st.columns(len(stages))
+        for col, stage in zip(cols, stages):
+            with col:
+                placeholders[stage] = st.empty()
+                with placeholders[stage].container(key=f"vdx-section-{stage}-skeleton"):
+                    render_skeleton(stage)
+    return placeholders
+
+
+def _render_all_sections(result: dict) -> None:
+    """Cache-hit path: redraw the cached result directly into the same
+    _ROWS grid, no staged reveal or skeletons (there's no actual loading
+    happening).
+    """
+    for title, stages in _ROWS:
+        st.subheader(title)
+        cols = st.columns(len(stages))
+        for col, stage in zip(cols, stages):
+            with col:
+                with st.container(key=f"vdx-section-{stage}-content"):
+                    _RENDER_BY_STAGE[stage](*_EXTRACT_BY_STAGE[stage](result))
 
 
 st.title("VisionDx")
@@ -268,26 +389,13 @@ if is_new_computation:
     # and before any section placeholder -- position: sticky keeps it
     # pinned to the viewport top once scrolled past, but only from
     # wherever it sits in DOM order onward. Creating it after the section
-    # placeholders (tried first, caught live) put five skeleton/result
-    # blocks above it, so scrolling past the header still left the banner
-    # off-screen below real content -- the exact bug this page exists to
-    # fix, just moved. It has to be the first thing in the results flow.
+    # placeholders (tried first, caught live) put the grid above it, so
+    # scrolling past the header still left the banner off-screen below
+    # real content -- the exact bug this page exists to fix, just moved.
+    # It has to be the first thing in the results flow.
     banner = ProgressBanner()
 
-    # Skeleton placeholders for every section, filled immediately -- the
-    # whole results area shows loading shape at once, not just a banner
-    # near the top, so a scrolled-down user sees "this is loading"
-    # wherever they're looking, not a blank gap.
-    # Streamlit requires every `key=` to be unique across the WHOLE script
-    # run, even across sequential writes to the same st.empty() placeholder
-    # -- the skeleton and the real content for a section can't share one
-    # key, hence the "-skeleton"/"-content" suffixes below. Both still
-    # match theme.py's `[class*="st-key-vdx-section-"]` substring selector.
-    placeholders = {}
-    for stage, _, _ in _SECTIONS:
-        placeholders[stage] = st.empty()
-        with placeholders[stage].container(key=f"vdx-section-{stage}-skeleton"):
-            render_skeleton(stage)
+    placeholders = _create_stage_placeholders()
 
     def on_stage(stage_name, value):
         banner.advance(stage_name)
@@ -308,12 +416,8 @@ if is_new_computation:
     st.session_state["_vdx_result"] = result
     st.session_state["_vdx_cache_key"] = cache_key
 else:
-    # Nothing new to compute -- redraw the cached sections directly, no
-    # staged reveal or skeletons (there's no actual loading happening).
     result = st.session_state["_vdx_result"]
-    for stage, fn, extract in _SECTIONS:
-        with st.container(key=f"vdx-section-{stage}-content"):
-            fn(*extract(result))
+    _render_all_sections(result)
 
 render_image_comparison(result)
 

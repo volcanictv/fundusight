@@ -30,15 +30,31 @@ def test_demo_mode_runs_full_pipeline_without_exceptions():
     at = at.run(timeout=_RUN_TIMEOUT)
 
     assert not at.exception
-    # Every major section header should have rendered -- a stage silently
-    # failing to produce output would shrink this list.
+    # Every major dashboard row header should have rendered -- a stage
+    # silently failing to produce output would shrink this list. Redesign:
+    # the per-disease/quality/vessel/optic-disc labels are no longer
+    # st.header/st.subheader roles (they're compact tile titles rendered as
+    # raw HTML via st.markdown, see app/main.py's _tile_label()/
+    # render_stat_tile()), so those are checked via markdown content below
+    # instead of the header-role collection.
     headers = {h.value for h in at.header} | {h.value for h in at.subheader}
     assert {
         "Results",
-        "Image Quality",
-        "Preprocessing",
-        "Diabetic Retinopathy Detection",
-        "Vessel Biomarkers",
-        "Optic Disc / Cup / Macula",
+        "Overview",
+        "Disease Screening",
+        "Biomarkers",
+        "Image Comparison",
         "Report Preview",
     } <= headers
+
+    markdown_text = " ".join(m.value for m in at.markdown)
+    for expected in (
+        "Image Quality",
+        "Preprocessing",
+        "Diabetic Retinopathy",
+        "Glaucoma",
+        "AMD",
+        "Vessel Biomarkers",
+        "Optic Disc",
+    ):
+        assert expected in markdown_text, f"expected tile label {expected!r} not found"

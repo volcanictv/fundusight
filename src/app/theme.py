@@ -1,61 +1,85 @@
-"""Phase 9: dashboard visual theme.
+"""Phase 9 / redesign: dashboard visual theme.
 
-One CSS injection point for the dashboard's visual design: a dense,
-structured "medical suite" look -- light neutral surfaces, bento-grid
-metric cards, circular/bar micro-visualizations, badge pills, and compact
-data grids in place of plain text rows. Streamlit has no first-class
+A dense, glass-surfaced "instrument panel" look: frosted white cards
+(backdrop-filter blur + saturation boost, the trick that makes Apple's own
+frosted materials read as "alive" rather than washed out) float over a
+softly two-toned light background, with a warm copper / deep teal accent
+duo drawn from the subject itself -- copper for the optic disc's pale
+warm tissue and "a finding is present," teal for fundus-imaging equipment's
+characteristic blue-green and "normal/calm." Streamlit has no first-class
 theming API expressive enough for this (its config.toml theme only covers
 a handful of colors), so this injects scoped CSS instead -- targeting
 Streamlit's `data-testid` attributes rather than its generated class
 names, since those are the one part of its DOM that's meant to be a
 stable styling hook across versions.
+
+Deliberately NOT applied to report/pdf.py's ReportLab output -- that's a
+separate, print-optimized renderer (ink-conscious, A4) where glass/blur/
+gradient treatments would actively work against the stated goal of a clean
+printed page. Both renderers still walk the same report/content.py
+Section list, so they can never disagree on *content*, only presentation.
 """
 
 import streamlit as st
 
-# Same accent as report/pdf.py's _ACCENT_COLOR -- keeps the in-app preview
-# and the exported PDF visually consistent, not two different brands.
-_ACCENT = "#0071E3"
-_TEXT = "#14171C"
-_MUTED = "#6B7280"
-_BORDER = "#E4E6EA"
-_BACKGROUND = "#F7F8FA"
-_CARD = "#FFFFFF"
-_SUCCESS = "#059669"
-_WARNING = "#B45309"
-_CHIP_BG = "#F0F1F3"
+# Same accent family as report/pdf.py's restrained palette in spirit, but
+# re-hued for the glass theme -- see module docstring for why copper/teal,
+# not the old flat blue/emerald/amber trio.
+_TEAL = "#0E7C86"  # primary accent: buttons, links, progress fill, "normal" status
+_COPPER = "#B3611A"  # "a finding is present" / attention status, used sparingly
+_INFO = "#5B6B7A"  # neutral/informational pill, deliberately quiet -- not a 3rd loud accent
+_TEXT = "#1A1D23"
+_MUTED = "#5F6570"
+_BORDER = "#DCE0E7"
+_BACKGROUND = "#ECEEF3"
+_GLASS = "rgba(255, 255, 255, 0.72)"
+_GLASS_BORDER = "rgba(255, 255, 255, 0.85)"
+_TRACK = "rgba(255, 255, 255, 0.5)"
 
 _CSS = f"""
 <style>
-/* Inter (sans, UI/prose) + JetBrains Mono (numeric metrics) -- both open
-   and Google-Fonts-hosted. "SF Pro Display" was the original ask, but
-   it's Apple-licensed and not legally self-hostable off Apple platforms;
-   Inter is the standard open substitute, explicitly designed as an
-   SF-Pro-adjacent UI face. Trade-off worth flagging: this adds a network
-   dependency the app didn't have before (it was deliberately
-   system-fonts-only for offline robustness) -- the font-family fallback
-   chains below mean a blocked/slow request just silently degrades to
-   system fonts, no broken layout, but the "premium" typography itself
-   needs network access to actually show up.
-   */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap');
+/* Inter (UI/prose) + JetBrains Mono (numeric data) stay -- both already
+   doing their job well, no reason to churn a typeface that works. Fraunces
+   (a variable serif with warm, slightly editorial terminals) is new: used
+   only for the page title, section headers, and each disease tile's
+   verdict line -- an "authored report" register contrasted deliberately
+   against the cold, precise mono used for raw numbers. This is the one
+   real typographic risk this redesign takes; everything else stays
+   disciplined around it. All three are open, Google-Fonts-hosted (same
+   network-dependency trade-off as before -- degrades to system fonts
+   silently if blocked, no broken layout). */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@500;600&display=swap');
 
 :root {{
-    --vdx-accent: {_ACCENT};
+    --vdx-teal: {_TEAL};
+    --vdx-copper: {_COPPER};
+    --vdx-info: {_INFO};
     --vdx-text: {_TEXT};
     --vdx-muted: {_MUTED};
     --vdx-rule: {_BORDER};
     --vdx-background: {_BACKGROUND};
-    --vdx-card: {_CARD};
-    --vdx-success: {_SUCCESS};
-    --vdx-warning: {_WARNING};
-    --vdx-chip-bg: {_CHIP_BG};
+    --vdx-glass: {_GLASS};
+    --vdx-glass-border: {_GLASS_BORDER};
+    --vdx-track: {_TRACK};
     --vdx-font-sans: 'Inter', -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    --vdx-font-serif: 'Fraunces', Georgia, "Times New Roman", serif;
     --vdx-font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Consolas, monospace;
 }}
 
+/* A very subtle two-tone wash (faint warm glow upper-left, faint cool glow
+   lower-right, both low-opacity radial gradients over the base neutral) --
+   a flat single-hue background gives frosted glass nothing to actually
+   refract, which makes glassmorphism pointless. The base neutral itself
+   (#ECEEF3) is also deliberately deeper than a near-white card so glass
+   cards read as visibly translucent against it, not just "a white box on
+   an almost-identical off-white page" (the old design's bg/card contrast
+   was only ~2%, too flat for glass to read). */
 .stApp {{
     background-color: var(--vdx-background);
+    background-image:
+        radial-gradient(ellipse 900px 600px at 8% 0%, rgba(179, 97, 26, 0.07), transparent 60%),
+        radial-gradient(ellipse 900px 700px at 100% 100%, rgba(14, 124, 134, 0.08), transparent 60%);
+    background-attachment: fixed;
 }}
 
 html, body, [class*="css"] {{
@@ -63,72 +87,79 @@ html, body, [class*="css"] {{
     color: var(--vdx-text);
 }}
 
-/* !important on the font-family here specifically: verified live that
-   Streamlit ships its own emotion-generated rule directly targeting
-   headings (e.g. ".st-emotion-cache-<hash> h1"), which -- as a
-   class+type selector -- beats a plain "h1, h2, h3" selector on
-   specificity regardless of injection order, and any DIRECT rule on an
-   element always beats inheriting the font-family from html/body above.
-   This is a deliberate, targeted override of a third-party framework's
-   own opinionated default (whose hashed class name isn't a stable
-   selector to out-specificity against), not a general !important habit. */
+/* !important here specifically: verified live that Streamlit ships its own
+   emotion-generated rule directly targeting headings (e.g.
+   ".st-emotion-cache-<hash> h1"), which -- as a class+type selector --
+   beats a plain "h1, h2, h3" selector on specificity regardless of
+   injection order. Deliberate, targeted override of a third-party
+   framework's own opinionated default, not a general !important habit. */
 h1, h2, h3 {{
-    font-family: var(--vdx-font-sans) !important;
+    font-family: var(--vdx-font-serif) !important;
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--vdx-text);
 }}
 
-/* Denser than a generic "Apple-like" restrained layout: the page already
-   sets layout="wide" in main.py, so let content actually use that width
-   rather than capping it back down, and cut the top padding -- a
-   data-dense dashboard doesn't need as much breathing room above the
-   fold as a marketing-style page does. */
+/* Denser than before: less top padding, and the page already uses
+   layout="wide" so content should use that width rather than capping it
+   back down -- an information-dense dashboard doesn't want as much
+   breathing room above the fold as a marketing page. */
 .block-container {{
-    padding-top: 1.25rem;
+    padding-top: 0.75rem;
     padding-bottom: 3rem;
-    max-width: 1280px;
+    max-width: 1360px;
 }}
 
 hr {{
     border: none;
     border-top: 1px solid var(--vdx-rule);
-    margin: 1.1rem 0;
+    margin: 0.85rem 0;
 }}
 
-/* Bento metric cards -- upgrades every existing st.metric() call with no
-   Python changes: tighter padding, card background, monospaced numeric
-   value (medical/technical readouts read as more precise in a mono
-   face), uppercase/tracked label. */
+/* --- Shared glass surface -----------------------------------------------
+   One consistent "material" applied to every card-like element below
+   (metric tiles, ring cards, stat tiles, expanders): translucent white +
+   blur + a saturation boost (the trick that keeps Apple-style frosted
+   materials from reading as merely faded) + a soft top/left highlight
+   edge suggesting glass catching light, plus a diffuse shadow for lift. */
+div[data-testid="stMetric"],
+.vdx-ring-card,
+.vdx-stat-tile,
+div[data-testid="stExpander"] {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--vdx-glass-border);
+    border-radius: 14px;
+    box-shadow: 0 4px 24px rgba(20, 23, 30, 0.06);
+}}
+
 div[data-testid="stMetric"] {{
-    background-color: var(--vdx-card);
-    border: 1px solid var(--vdx-rule);
-    border-radius: 10px;
-    padding: 0.55rem 0.8rem;
+    padding: 0.5rem 0.75rem;
 }}
 
 div[data-testid="stMetricValue"] {{
     color: var(--vdx-text);
     font-family: var(--vdx-font-mono);
-    font-size: 1.35rem;
+    font-size: 1.25rem;
 }}
 
 div[data-testid="stMetricLabel"] {{
     color: var(--vdx-muted);
-    font-size: 0.7rem;
+    font-size: 0.68rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.045em;
 }}
 
-/* Buttons: restrained accent fill, subtle motion on hover only -- no
-   animation on page load or idle state ("purposeful", not decorative). */
+/* Buttons/links: teal is the single primary accent now (replacing the old
+   flat blue) -- restrained motion on hover only, never on load/idle. */
 .stButton > button, .stDownloadButton > button {{
-    background-color: var(--vdx-accent);
+    background-color: var(--vdx-teal);
     color: white;
     border: none;
     border-radius: 10px;
-    padding: 0.5rem 1.25rem;
+    padding: 0.45rem 1.15rem;
     font-weight: 500;
     transition: opacity 0.15s ease;
 }}
@@ -138,15 +169,13 @@ div[data-testid="stMetricLabel"] {{
 }}
 
 div[data-testid="stExpander"] {{
-    border: 1px solid var(--vdx-rule);
-    border-radius: 12px;
     transition: border-color 0.15s ease;
 }}
 
 .vdx-caption {{
     color: var(--vdx-muted);
-    font-size: 0.85rem;
-    margin-top: 0.25rem;
+    font-size: 0.82rem;
+    margin-top: 0.2rem;
 }}
 
 .vdx-disclaimer {{
@@ -154,50 +183,49 @@ div[data-testid="stExpander"] {{
     font-size: 0.8rem;
     border-top: 1px solid var(--vdx-rule);
     padding-top: 0.75rem;
-    margin-top: 2rem;
+    margin-top: 1.5rem;
 }}
 
-/* --- Micro-visualizations: circular ring gauge ------------------------
+/* --- Micro-visualization: instrument-bezel ring gauge --------------------
    One reusable component (see app/components.py's render_ring()),
-   parameterized entirely through inline CSS custom properties
-   (--pct 0-100, --ring-color) rather than five bespoke pieces per metric.
-   conic-gradient draws the filled arc; the inner disc masks the center
-   to give the "ring" (not pie-chart) look, with the value printed in the
-   monospace face for a precise, technical readout. */
+   parameterized entirely through inline CSS custom properties (--pct
+   0-100, --ring-color). Heavier than the old thin conic-gradient ring --
+   a thicker arc + an inset shadow on the inner disc suggests a lens/
+   eyepiece bezel rather than a flat progress ring, the one deliberate
+   "instrument" signature this redesign leans on. */
 .vdx-ring-card {{
-    background: var(--vdx-card);
-    border: 1px solid var(--vdx-rule);
-    border-radius: 12px;
-    padding: 0.9rem;
+    padding: 0.75rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.55rem;
+    gap: 0.4rem;
 }}
 
 .vdx-ring {{
     position: relative;
-    width: 64px;
-    height: 64px;
+    width: 60px;
+    height: 60px;
     border-radius: 50%;
-    background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--vdx-chip-bg) 0);
+    background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--vdx-track) 0);
+    box-shadow: inset 0 1px 3px rgba(20, 23, 30, 0.15);
 }}
 
 .vdx-ring-inner {{
     position: absolute;
-    inset: 7px;
+    inset: 8px;
     border-radius: 50%;
-    background: var(--vdx-card);
+    background: var(--vdx-glass);
+    box-shadow: inset 0 1px 2px rgba(20, 23, 30, 0.12);
     display: grid;
     place-items: center;
     font-family: var(--vdx-font-mono);
     font-weight: 600;
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: var(--vdx-text);
 }}
 
 .vdx-ring-label {{
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.045em;
@@ -205,40 +233,76 @@ div[data-testid="stExpander"] {{
     text-align: center;
 }}
 
-/* --- Badge pills -------------------------------------------------------
-   Reusable status/severity indicator (see app/components.py's
-   render_pill()) -- light tint background, saturated text, never color
-   alone carrying meaning since the text itself states the label. */
+/* --- Badge pills ----------------------------------------------------------
+   Semantic variant names (see app/components.py's render_pill()): "normal"
+   (teal -- no finding / calm), "attention" (copper -- a finding is
+   present), "info" (neutral slate -- informational, not a status verdict).
+   Renamed from the old color-named "emerald"/"amber"/"blue" since those
+   names no longer describe the actual colors once re-hued -- a latent
+   mismatch-bug class this avoids outright. */
 .vdx-pill {{
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.25rem 0.7rem;
+    padding: 0.22rem 0.65rem;
     border-radius: 999px;
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     font-weight: 600;
     font-family: var(--vdx-font-sans);
 }}
-.vdx-pill-emerald {{ background: #ECFDF5; color: var(--vdx-success); }}
-.vdx-pill-amber {{ background: #FFFBEB; color: var(--vdx-warning); }}
-.vdx-pill-blue {{ background: #EFF6FF; color: var(--vdx-accent); }}
+.vdx-pill-normal {{ background: rgba(14, 124, 134, 0.12); color: var(--vdx-teal); }}
+.vdx-pill-attention {{ background: rgba(179, 97, 26, 0.12); color: var(--vdx-copper); }}
+.vdx-pill-info {{ background: rgba(91, 107, 122, 0.12); color: var(--vdx-info); }}
 
-/* --- Compact data grid ---------------------------------------------
-   Secondary/detail numbers (e.g. branch count, tortuosity, disc/cup
-   diameters) -- headline numbers stay in ring cards or st.metric tiles,
-   this is for the supporting detail rows (see app/components.py's
-   render_datagrid()). */
+/* --- Compact stat tile -----------------------------------------------------
+   One dense glass unit combining a label + pill + ring gauge (see
+   app/components.py's render_stat_tile()) -- replaces the old two-column
+   ring/datagrid layout for the three disease-detection tiles, the direct
+   fix for their previous repetition (full subheader + pill + ring +
+   datagrid + full-size image, three times over). */
+.vdx-stat-tile {{
+    padding: 0.85rem 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    height: 100%;
+}}
+
+.vdx-stat-tile-header {{
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.5rem;
+}}
+
+.vdx-stat-tile-title {{
+    font-family: var(--vdx-font-serif);
+    font-weight: 600;
+    font-size: 0.98rem;
+    color: var(--vdx-text);
+    line-height: 1.25;
+}}
+
+.vdx-stat-tile-body {{
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}}
+
+/* --- Compact data grid ---------------------------------------------------
+   Secondary/detail numbers (see app/components.py's render_datagrid()) --
+   headline numbers stay in ring cards or st.metric tiles. */
 .vdx-datagrid {{
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.85rem;
-    margin-top: 0.25rem;
+    font-size: 0.82rem;
+    margin-top: 0.2rem;
 }}
 .vdx-datagrid tr:nth-child(even) {{
-    background: var(--vdx-background);
+    background: rgba(255, 255, 255, 0.35);
 }}
 .vdx-datagrid td {{
-    padding: 0.45rem 0.65rem;
+    padding: 0.4rem 0.6rem;
     border-bottom: 1px solid var(--vdx-rule);
 }}
 .vdx-datagrid tr:last-child td {{
@@ -254,13 +318,11 @@ div[data-testid="stExpander"] {{
     color: var(--vdx-text);
 }}
 
-/* --- Image hover-zoom ---------------------------------------------
-   Targets Streamlit's own stImage wrapper directly -- no custom wrapper
-   needed. Scaling the <img> itself (not the wrapper) inside an
-   overflow:hidden card keeps the zoom clipped to a fixed rounded frame
-   instead of spilling over neighboring content, and keeps the caption
-   (Streamlit renders it as a sibling under the image, not inside the
-   scaled element) from zooming along with the image. */
+/* --- Image hover-zoom ------------------------------------------------------
+   Targets Streamlit's own stImage wrapper directly. Scaling the <img>
+   itself (not the wrapper) inside an overflow:hidden card keeps the zoom
+   clipped to a fixed rounded frame, and keeps the caption (a sibling under
+   the image, not inside the scaled element) from zooming along with it. */
 div[data-testid="stImage"] {{
     border-radius: 12px;
     overflow: hidden;
@@ -274,23 +336,21 @@ div[data-testid="stImage"]:hover img {{
     transform: scale(1.04);
 }}
 
-/* --- Pills navigation (st.pills / st.segmented_control) ---------------
+/* --- Pills navigation (st.pills / st.segmented_control) --------------------
    Both widgets share one underlying component -- confirmed via the
    installed Streamlit build's own frontend bundle -- data-testid
-   "stButtonGroup", not a guessed "stPills". Styled as a rounded segmented
-   track; the selected-pill accent fill comes from Streamlit's own
-   aria-checked/data-selected state on the inner button, confirmed and
-   tuned live rather than guessed (see app/main.py's image comparison
-   viewer). */
+   "stButtonGroup". Styled as a rounded segmented track on the glass
+   material; the selected-pill accent fill comes from Streamlit's own
+   aria-checked/data-selected state on the inner button. */
 div[data-testid="stButtonGroup"] {{
-    background: var(--vdx-chip-bg);
-    padding: 0.25rem;
+    background: var(--vdx-track);
+    padding: 0.22rem;
     border-radius: 999px;
     gap: 0.15rem;
 }}
 div[data-testid="stButtonGroup"] button {{
     border-radius: 999px !important;
-    font-size: 0.82rem;
+    font-size: 0.8rem;
 }}
 
 /* --- v2: loading/progress experience ---------------------------------
@@ -302,30 +362,22 @@ div[data-testid="stButtonGroup"] button {{
    "roaming range" (confirmed empirically -- even one plain, unstyled
    wrapper div between a sticky element and its tall ancestor breaks it in
    this Chromium build). Streamlit always wraps `st.markdown()` output in
-   several of its own layers (stMarkdownContainer > ... > stElementContainer
-   > stVerticalBlock), so a sticky element rendered through a normal
-   Streamlit call can never be a direct child of anything tall enough.
+   several of its own layers, so a sticky element rendered through a
+   normal Streamlit call can never be a direct child of anything tall
+   enough.
 
-   `position: fixed` sidesteps that (anchored to the viewport, independent
-   of any ancestor's height), but has its OWN headless-Chromium-specific
-   gotcha, also verified live: a fixed element spanning the full viewport
-   width (`left: 0; right: 0`, or any explicit width equal to the
-   viewport) silently fails to paint its TEXT content in this environment
-   (background/border still render -- only text disappears) -- reproduced
-   with zero Streamlit involvement, isolated down to element width alone
-   (a ~840px-wide fixed box renders text fine; a 1440px/100vw one doesn't,
-   same content, same everything else). Centering it as a fixed-width
-   floating card via `left: 50%; transform: translateX(-50%)` rather than
-   `left/right: 0` avoids the bug entirely -- and reads as more
-   "restrained/Apple-like" than an edge-to-edge bar anyway. The disclaimer
-   footer below follows this exact same proven pattern.
+   `position: fixed` sidesteps that, but has its OWN headless-Chromium-
+   specific gotcha, also verified live: a fixed element spanning the full
+   viewport width silently fails to paint its TEXT content in this
+   environment (background/border still render -- only text disappears).
+   Centering it as a fixed-width floating card via `left: 50%; transform:
+   translateX(-50%)` avoids the bug entirely.
 
    `top: 76px` clears Streamlit's own header toolbar (measured live:
-   [data-testid="stHeader"], 60px tall, z-index 999990, position: absolute
-   -- stays visually fixed in place too) plus a small gap. A spacer
+   [data-testid="stHeader"], 60px tall) plus a small gap. A spacer
    (.vdx-progress-banner-spacer, rendered in normal flow right before this)
    reserves room so real content isn't heavily covered when the banner
-   first appears -- some overlap is fine/expected for a floating card. */
+   first appears. */
 .vdx-progress-banner-spacer {{
     height: 3rem;
 }}
@@ -338,13 +390,13 @@ div[data-testid="stButtonGroup"] button {{
     width: min(880px, calc(100vw - 3rem));
     box-sizing: border-box;
     z-index: 999;
-    background-color: rgba(251, 251, 253, 0.92);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--vdx-rule);
+    background: var(--vdx-glass);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--vdx-glass-border);
     border-radius: 14px;
     padding: 0.9rem 1.25rem;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 8px 28px rgba(20, 23, 30, 0.12);
 }}
 
 .vdx-progress-label {{
@@ -352,10 +404,6 @@ div[data-testid="stButtonGroup"] button {{
     font-weight: 500;
     color: var(--vdx-text);
     margin-bottom: 0.5rem;
-    /* Short, subtle "something happened" tick each time the label swaps
-       -- proportional feedback, not decoration (fires once per .advance()
-       call since it's a CSS animation on a freshly-set element, not an
-       infinite loop). */
     animation: vdxLabelPulse 0.3s ease-out;
 }}
 
@@ -369,7 +417,7 @@ div[data-testid="stButtonGroup"] button {{
 .vdx-progress-fill {{
     height: 100%;
     border-radius: 2px;
-    background-color: var(--vdx-accent);
+    background-color: var(--vdx-teal);
     transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }}
 
@@ -378,17 +426,13 @@ div[data-testid="stButtonGroup"] button {{
     100% {{ opacity: 1; transform: translateY(0); }}
 }}
 
-/* Skeleton placeholders: the entire results area shows loading shape
-   immediately (not just the banner) -- a scrolled-down user sees "this is
-   loading" everywhere on screen, not a blank gap below an off-screen
-   spinner. */
 .vdx-skeleton {{
-    margin-bottom: 1.5rem;
+    margin-bottom: 1.25rem;
 }}
 
 .vdx-skeleton-box {{
     border-radius: 10px;
-    background: linear-gradient(100deg, var(--vdx-rule) 30%, #ECECEF 45%, var(--vdx-rule) 60%);
+    background: linear-gradient(100deg, var(--vdx-rule) 30%, #F5F6F9 45%, var(--vdx-rule) 60%);
     background-size: 200% 100%;
     animation: vdxShimmer 1.6s ease-in-out infinite;
 }}
@@ -411,7 +455,7 @@ div[data-testid="stButtonGroup"] button {{
 }}
 
 .vdx-skeleton-image {{
-    height: 220px;
+    height: 200px;
     width: 100%;
 }}
 
@@ -421,12 +465,8 @@ div[data-testid="stButtonGroup"] button {{
 }}
 
 /* Result sections fade/slide in gently as they're revealed -- scoped via
-   st.container(key=...)'s stable "st-key-<key>" class (confirmed present
-   in the installed Streamlit build), not a generic per-widget selector,
-   so a whole section animates as one unit rather than each metric tile
-   animating separately. Short and subtle enough that it reads fine
-   replaying on every rerun (cache-hit redraws use the same keys), not
-   just first mount. */
+   st.container(key=...)'s stable "st-key-<key>" class, so a whole section
+   animates as one unit rather than each metric tile animating separately. */
 [class*="st-key-vdx-section-"] {{
     animation: vdxFadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
 }}
@@ -437,8 +477,8 @@ div[data-testid="stButtonGroup"] button {{
 }}
 
 .vdx-error-card {{
-    background-color: #FBF6EC;
-    border: 1px solid #EFE1BE;
+    background-color: rgba(179, 97, 26, 0.08);
+    border: 1px solid rgba(179, 97, 26, 0.25);
     border-radius: 12px;
     padding: 1rem 1.25rem;
     margin-bottom: 1rem;
@@ -457,14 +497,10 @@ div[data-testid="stButtonGroup"] button {{
 }}
 
 /* --- Disclaimer footer -------------------------------------------------
-   "Educational/portfolio demonstration only" no longer breaks the page's
-   flow as an inline caption under the title -- it's a small floating
-   footer, following the exact same fixed+centered+bounded-width pattern
-   as .vdx-progress-banner above (never left:0;right:0 -- see that block's
-   comment for why). Bottom-anchored deliberately: it then never shares
-   vertical territory with Streamlit's own header (top 0-60px) or the
-   progress banner (top 76px) during active loading, so there's no
-   stacking/collision logic needed between the two floating elements. */
+   Small floating footer, same fixed+centered+bounded-width pattern as
+   .vdx-progress-banner above. Bottom-anchored deliberately so it never
+   shares vertical territory with Streamlit's own header or the progress
+   banner during active loading. */
 .vdx-footer-spacer {{
     height: 2.5rem;
 }}
@@ -477,10 +513,10 @@ div[data-testid="stButtonGroup"] button {{
     width: min(680px, calc(100vw - 3rem));
     box-sizing: border-box;
     z-index: 900;
-    background-color: rgba(255, 255, 255, 0.92);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--vdx-rule);
+    background: var(--vdx-glass);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--vdx-glass-border);
     border-radius: 12px;
     padding: 0.5rem 1rem;
     font-size: 0.78rem;
@@ -488,10 +524,12 @@ div[data-testid="stButtonGroup"] button {{
     text-align: center;
 }}
 
-/* Print support: pressing Ctrl+P on the live preview should print just
-   the report content, not Streamlit's own chrome. The PDF download is
-   still the primary/reliable print path (see report/pdf.py) -- this is a
-   convenience for the live-preview screen itself. */
+/* Print support: pressing Ctrl+P on the live preview should print just the
+   report content, not Streamlit's own chrome, and glass/blur/gradient
+   treatments should flatten to plain white -- they don't print well and
+   the PDF download (report/pdf.py, unaffected by this theme entirely) is
+   the primary/reliable print path; this is just a convenience fallback
+   for the live-preview screen itself. */
 @media print {{
     [data-testid="stSidebar"],
     [data-testid="stHeader"],
@@ -505,6 +543,18 @@ div[data-testid="stButtonGroup"] button {{
     .vdx-disclaimer-footer,
     .vdx-footer-spacer {{
         display: none !important;
+    }}
+    .stApp {{
+        background-image: none !important;
+    }}
+    div[data-testid="stMetric"],
+    .vdx-ring-card,
+    .vdx-stat-tile,
+    div[data-testid="stExpander"] {{
+        background: white !important;
+        backdrop-filter: none !important;
+        -webkit-backdrop-filter: none !important;
+        box-shadow: none !important;
     }}
     .block-container {{
         max-width: 100% !important;

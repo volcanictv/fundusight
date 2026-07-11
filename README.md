@@ -2,7 +2,7 @@
 
 AI-assisted retinal disease analysis pipeline. Educational/portfolio project — not a diagnostic device.
 
-See `ROADMAP.md` for the phased build plan and `CLAUDE.md` for project conventions (used automatically by Claude Code).
+See `ROADMAP.md` for the phased build plan, `DEEP_DIVE.md` for longer write-ups of specific investigations/results, and `CLAUDE.md` for project conventions (used automatically by Claude Code).
 
 ## Setup
 

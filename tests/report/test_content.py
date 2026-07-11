@@ -3,7 +3,16 @@ import numpy as np
 from src.report.content import DISCLAIMER, build_report_content
 
 
-def _pipeline_result(detection=None, cam_overlay=None, cdr=0.3, disc_found=True):
+def _pipeline_result(
+    detection=None,
+    cam_overlay=None,
+    glaucoma=None,
+    glaucoma_cam_overlay=None,
+    amd=None,
+    amd_cam_overlay=None,
+    cdr=0.3,
+    disc_found=True,
+):
     size = 50
     working_image = np.zeros((size, size, 3), dtype=np.uint8)
     mask = np.zeros((size, size), dtype=bool)
@@ -21,6 +30,10 @@ def _pipeline_result(detection=None, cam_overlay=None, cdr=0.3, disc_found=True)
         "preprocessing_preview": {"before": working_image, "after": working_image},
         "detection": detection,
         "cam_overlay": cam_overlay,
+        "glaucoma": glaucoma,
+        "glaucoma_cam_overlay": glaucoma_cam_overlay,
+        "amd": amd,
+        "amd_cam_overlay": amd_cam_overlay,
         "vessels": {
             "vessel_density": 12.345,
             "branch_count": 7,
@@ -71,10 +84,74 @@ def test_build_report_content_with_detection_includes_probabilities_and_cam():
     assert any(s.title == "Explainability" for s in content.sections)
 
 
+def _binary_detection(class_idx, label):
+    probabilities = [0.0, 0.0]
+    probabilities[class_idx] = 0.9
+    probabilities[1 - class_idx] = 0.1
+    return {"label": label, "probability": 0.9, "probabilities": probabilities, "class_idx": class_idx}
+
+
+def test_build_report_content_without_glaucoma_explains_unavailable():
+    content = build_report_content(_pipeline_result(glaucoma=None))
+
+    section = next(s for s in content.sections if s.title == "Glaucoma Detection")
+    assert section.kind == "text"
+    assert "not available" in section.body
+    assert not any(s.title == "Glaucoma Detection Probabilities" for s in content.sections)
+
+
+def test_build_report_content_with_glaucoma_includes_probabilities_and_cam():
+    glaucoma = _binary_detection(1, "Glaucoma Signs Present")
+    cam = np.zeros((10, 10, 3), dtype=np.uint8)
+
+    content = build_report_content(_pipeline_result(glaucoma=glaucoma, glaucoma_cam_overlay=cam, cdr=0.65))
+
+    prob_section = next(s for s in content.sections if s.title == "Glaucoma Detection Probabilities")
+    assert len(prob_section.body["rows"]) == 2
+    assert any(s.title == "Glaucoma Detection Explainability" for s in content.sections)
+
+
+def test_build_report_content_without_amd_explains_unavailable():
+    content = build_report_content(_pipeline_result(amd=None))
+
+    section = next(s for s in content.sections if "AMD" in s.title and s.kind == "text")
+    assert "not available" in section.body
+
+
+def test_build_report_content_with_amd_includes_probabilities_and_cam():
+    amd = _binary_detection(1, "AMD Signs Present")
+    cam = np.zeros((10, 10, 3), dtype=np.uint8)
+
+    content = build_report_content(_pipeline_result(amd=amd, amd_cam_overlay=cam))
+
+    prob_section = next(s for s in content.sections if "AMD" in s.title and s.kind == "table")
+    assert len(prob_section.body["rows"]) == 2
+    assert any("AMD" in s.title and s.kind == "image" for s in content.sections)
+
+
 def test_recommendation_flags_elevated_cdr():
     content = build_report_content(_pipeline_result(cdr=0.65))
     rec = next(s for s in content.sections if s.title == "Recommendation")
     assert "cup-to-disc" in rec.body.lower()
+
+
+def test_recommendation_flags_disagreement_between_cdr_and_glaucoma_classifier():
+    # Elevated CDR but classifier says no glaucoma signs -- the two signals
+    # disagree, so the recommendation should say so explicitly.
+    glaucoma = _binary_detection(0, "No Glaucoma Signs")
+    content = build_report_content(_pipeline_result(glaucoma=glaucoma, cdr=0.65))
+
+    rec = next(s for s in content.sections if s.title == "Recommendation")
+    assert "different directions" in rec.body
+
+
+def test_recommendation_no_disagreement_note_when_signals_agree():
+    # Elevated CDR and classifier both flag glaucoma -- no disagreement to report.
+    glaucoma = _binary_detection(1, "Glaucoma Signs Present")
+    content = build_report_content(_pipeline_result(glaucoma=glaucoma, cdr=0.65))
+
+    rec = next(s for s in content.sections if s.title == "Recommendation")
+    assert "different directions" not in rec.body
 
 
 def test_recommendation_always_includes_disclaimer():
