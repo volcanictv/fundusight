@@ -27,7 +27,7 @@ from tqdm import tqdm
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 from src.segmentation import optic_disc, vessels
-from src.segmentation.optic_disc_dataset import _remap_mask_to_class_indices, build_pairs
+from src.segmentation.optic_disc_dataset import _remap_mask_to_class_indices, build_pooled_pairs, split_pooled_pairs
 from src.segmentation.optic_disc_infer import DEFAULT_WEIGHTS_PATH, compute_optic_biomarkers_hybrid, load_optic_disc_model
 
 REFUGE_ROOT = os.path.join(PROJECT_ROOT, "REFUGE2")
@@ -69,8 +69,15 @@ def main():
     print(f"Using device: {device}")
     model = load_optic_disc_model(DEFAULT_WEIGHTS_PATH, device=str(device))
 
-    test_pairs = build_pairs(REFUGE_ROOT)["test"]
-    print(f"Evaluating full pipeline on {len(test_pairs)} held-out REFUGE2 test images...")
+    # Use the SAME pooled/re-split test set (seed=42) that
+    # optic_disc_train.py holds out and reports Dice for -- REFUGE2's own
+    # official test folder (build_pairs()) is no longer a valid held-out
+    # set for this checkpoint, since it was trained on a pooled re-split of
+    # all 1200 images (see optic_disc_dataset.py's module docstring) and
+    # most of the official test folder's images are now inside that
+    # training set.
+    _, _, test_pairs = split_pooled_pairs(build_pooled_pairs(REFUGE_ROOT), seed=42)
+    print(f"Evaluating full pipeline on {len(test_pairs)} held-out REFUGE2 test images (pooled/re-split)...")
 
     dice_rim_scores, dice_cup_scores = [], []
     pred_cdrs, gt_cdrs, cdr_abs_errors = [], [], []

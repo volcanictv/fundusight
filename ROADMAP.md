@@ -151,6 +151,25 @@ weights; the prior domain-split checkpoint is kept at
 `checkpoints/optic_disc_unet.provisional_domainsplit.pth` for reference/
 comparison, not used by inference.
 
+The Dice numbers above are network-only, on ground-truth ROI crops (no
+localization error, no post-processing) -- `scripts/
+evaluate_optic_disc_full_pipeline.py` measures the harder, more realistic
+number: the FULL pipeline (Stage 6.1 classical ONH localization -> Stage
+6.2 -> mask cleanup -> Stage 6.3 CDR) against held-out images, and reports
+CDR agreement, not just Dice. That script still pointed at REFUGE2's own
+official test folder (`build_pairs()`) -- fixed to use the same pooled/
+re-split held-out set (`seed=42`) the retrain actually used, since the
+official folder is no longer a valid held-out set for this checkpoint
+(most of its images are now inside the pooled training set). Full-pipeline
+results (180 held-out images, 2026-07-11): `dice_rim=0.8414
+dice_cup=0.8149` (lower than the network-only numbers above, as expected
+once localization error and post-processing are included), mean predicted
+vertical CDR=0.4766 vs. mean ground-truth CDR=0.4722, **mean absolute CDR
+error=0.0571** (median=0.0368) -- close agreement, no major systematic
+bias, unlike the old domain-split checkpoint (whose cup Dice of 0.45 would
+have made its CDR unreliable, consistent with why the earlier calibration
+attempts in this section failed).
+
 **Done when:** disc mask, cup mask, and macula location are overlaid on a
 sample image, a vertical cup-disc ratio is printed alongside them, the
 cup-within-disc structural check passes (verified by a test), the
