@@ -10,7 +10,7 @@ into a readable card instead of a raw traceback -- the same "looks broken"
 problem, via a different path.
 
 Renders raw HTML via st.markdown(unsafe_allow_html=True), mirroring the
-established pattern in app/render_preview.py's table renderer.
+established pattern in app/components.py's small renderers.
 """
 
 import html

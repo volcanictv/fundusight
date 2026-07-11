@@ -8,6 +8,9 @@ browser click-through would (a widget key typo, an exception raised
 partway down the script, a missing session_state key).
 """
 
+import sys
+
+import pytest
 from streamlit.testing.v1 import AppTest
 
 _APP_PATH = "src/app/main.py"
@@ -15,6 +18,28 @@ _APP_PATH = "src/app/main.py"
 # on a real fundus photo takes well past AppTest's default few-second
 # timeout on CPU.
 _RUN_TIMEOUT = 180
+
+
+@pytest.fixture(autouse=True)
+def _fresh_theme_module():
+    """theme.py registers its ambient-cursor CCv2 component as a
+    module-level side effect at import time -- the pattern Streamlit's own
+    docs recommend (register once, not per-rerun), and it's correct for a
+    real server process where the component registry is equally long-lived.
+    AppTest instead builds a fresh mock registry per instance; Python's
+    module cache means a second AppTest in the same pytest process reuses
+    the FIRST instance's now-stale registration (theme.py doesn't re-import,
+    so it never re-registers), which raises "Component ... is not
+    registered" even though the same app works fine for real (confirmed
+    live: the failing test passes on its own, only fails after another
+    AppTest ran first in the same process). Evicting src.app.theme from
+    sys.modules before each test forces it to re-import -- and re-register
+    -- against that test's own registry.
+    """
+    for name in list(sys.modules):
+        if name == "src.app.theme":
+            del sys.modules[name]
+    yield
 
 
 def test_app_shows_upload_prompt_with_no_image_selected():
@@ -37,6 +62,12 @@ def test_demo_mode_runs_full_pipeline_without_exceptions():
     # raw HTML via st.markdown, see app/main.py's _tile_label()/
     # render_stat_tile()), so those are checked via markdown content below
     # instead of the header-role collection.
+    #
+    # "Report Preview" is gone (second redesign pass, see app/main.py's
+    # module docstring): that section used to duplicate everything already
+    # shown above it. The Recommendation card (checked via markdown content
+    # below) is the one part of it that survived, since it's not shown
+    # anywhere else on the page.
     headers = {h.value for h in at.header} | {h.value for h in at.subheader}
     assert {
         "Results",
@@ -44,7 +75,6 @@ def test_demo_mode_runs_full_pipeline_without_exceptions():
         "Disease Screening",
         "Biomarkers",
         "Image Comparison",
-        "Report Preview",
     } <= headers
 
     markdown_text = " ".join(m.value for m in at.markdown)
@@ -56,5 +86,6 @@ def test_demo_mode_runs_full_pipeline_without_exceptions():
         "AMD",
         "Vessel Biomarkers",
         "Optic Disc",
+        "Recommendation",
     ):
         assert expected in markdown_text, f"expected tile label {expected!r} not found"

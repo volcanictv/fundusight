@@ -199,6 +199,38 @@ div[data-testid="stExpander"] {{
     margin-top: 1.5rem;
 }}
 
+/* --- Recommendation card --------------------------------------------------
+   The one thing the old page-length "Report Preview" walk had that
+   wasn't already shown elsewhere on the dashboard (see app/main.py's
+   module docstring) -- given the same glass material as every other
+   surface here, plus a teal left rule (this app's single primary accent)
+   to read as "the conclusion", not just another paragraph of body text. */
+.vdx-recommendation-card {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(20px) saturate(160%);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    border: 1px solid var(--vdx-glass-border);
+    border-left: 3px solid var(--vdx-teal);
+    border-radius: 14px;
+    padding: 1rem 1.35rem;
+    box-shadow: 0 4px 24px rgba(20, 23, 30, 0.06);
+    margin: 0.25rem 0 1.25rem;
+}}
+
+.vdx-recommendation-title {{
+    font-family: var(--vdx-font-serif);
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: var(--vdx-text);
+    margin-bottom: 0.45rem;
+}}
+
+.vdx-recommendation-body {{
+    font-size: 0.92rem;
+    line-height: 1.55;
+    color: var(--vdx-text);
+}}
+
 /* --- Micro-visualization: instrument-bezel ring gauge --------------------
    One reusable component (see app/components.py's render_ring()),
    parameterized entirely through inline CSS custom properties (--pct
@@ -578,6 +610,7 @@ div[data-testid="stButtonGroup"] button {{
     div[data-testid="stMetric"],
     .vdx-ring-card,
     .vdx-stat-tile,
+    .vdx-recommendation-card,
     div[data-testid="stExpander"] {{
         background: white !important;
         backdrop-filter: none !important;

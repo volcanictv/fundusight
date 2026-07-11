@@ -78,3 +78,64 @@ def probability_bar_chart(detection: dict) -> go.Figure:
         showlegend=False,
     )
     return figure
+
+
+# Binary classifiers (glaucoma, AMD) are NOMINAL-with-semantic-meaning, not
+# ordinal like DR severity above -- "present" isn't a step further along a
+# scale from "absent", it's the other one of two states. So this uses the
+# app's own two semantic colors directly (teal = normal/absent, copper =
+# attention/present, same mapping as render_pill()'s "normal"/"attention"
+# variants in components.py) rather than a single-hue ordinal ramp.
+_TEAL = "#0E7C86"
+_COPPER = "#B3611A"
+
+
+def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
+    """Horizontal bar chart for a 2-class (absent/present) classifier.
+    `detection` is glaucoma_infer.predict()/amd_infer.predict()'s return
+    dict; `labels` is that model's LABELS dict (class_idx -> display text).
+    Gives glaucoma/AMD the same probability-breakdown view DR's
+    probability_bar_chart() already provides, instead of that breakdown
+    only existing in the PDF-mirror report preview.
+    """
+    display_labels = [labels[i] for i in range(2)]
+    values = [p * 100 for p in detection["probabilities"]]
+    predicted_idx = detection["class_idx"]
+    bar_colors = [_TEAL, _COPPER]
+
+    text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(values)]
+    text_colors = [_PRIMARY_INK if i == predicted_idx else _MUTED_INK for i in range(2)]
+
+    figure = go.Figure(
+        go.Bar(
+            x=values,
+            y=display_labels,
+            orientation="h",
+            marker=dict(color=bar_colors, cornerradius=4),
+            text=text_labels,
+            textposition="outside",
+            textfont=dict(color=text_colors),
+            cliponaxis=False,
+            hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+        )
+    )
+    figure.update_layout(
+        height=140,
+        margin=dict(l=10, r=40, t=10, b=10),
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+        font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK),
+        bargap=0.5,
+        xaxis=dict(
+            range=[0, 112],
+            showgrid=True,
+            gridcolor=_GRIDLINE,
+            ticksuffix="%",
+            zeroline=False,
+            showline=False,
+            tickfont=dict(color=_MUTED_INK),
+        ),
+        yaxis=dict(autorange="reversed", showgrid=False, tickfont=dict(color=_PRIMARY_INK)),
+        showlegend=False,
+    )
+    return figure

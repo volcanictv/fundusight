@@ -2,7 +2,7 @@
 
 Ties every pipeline stage together: upload (or demo mode) -> quality ->
 preprocessing preview -> DR/glaucoma/AMD detection + Grad-CAM each ->
-vessel biomarkers -> optic disc/cup/CDR -> an in-app report preview -> PDF
+vessel biomarkers -> optic disc/cup/CDR -> a recommendation summary -> PDF
 download.
 
 Redesign pass: the page is now a dense multi-column dashboard instead of
@@ -13,6 +13,21 @@ near-identical full sections (subheader + pill + ring + datagrid +
 full-size Grad-CAM image, once each for DR/glaucoma/AMD) with three
 compact tiles -- the Grad-CAM images moved to the existing Image Comparison
 viewer at the bottom instead of repeating three times inline.
+
+Second redesign pass: the page used to ALSO render a full second
+"Report Preview" walk through report/content.py's Section list -- quality
+metrics, preprocessing before/after, each detection's text+table+image,
+vessel/optic-disc metrics+image -- immediately below everything above,
+duplicating essentially all of it a second time (the whole point of that
+walk was "verify what's in the PDF before downloading it", but by this
+point every number and image it showed already exists on the page). That
+walk is gone. What replaces it: Glaucoma/AMD tiles gained the same
+probability-breakdown expander DR already had (previously that split was
+only visible in the deleted walk-through's table), and the "Recommendation"
+text -- the one genuinely unique thing that walk had -- now renders directly
+via render_recommendation_card() (components.py) instead of being buried at
+the bottom of a page-length duplicate. app/render_preview.py is deleted
+along with it; nothing else imported its Section-walking helpers.
 
 v2 (kept): the pipeline runs progressively, not behind one opaque spinner.
 Each stage still gets its own st.empty() placeholder, filled the moment it
@@ -38,12 +53,13 @@ import cv2
 import numpy as np
 import streamlit as st
 
-from src.app.charts import probability_bar_chart
-from src.app.components import render_datagrid, render_ring, render_stat_tile
+from src.app.charts import binary_probability_chart, probability_bar_chart
+from src.app.components import render_datagrid, render_recommendation_card, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
-from src.app.render_preview import render_streamlit
 from src.app.theme import inject_ambient_cursor, inject_css
+from src.detection.amd_infer import AMD_LABELS
+from src.detection.glaucoma_infer import GLAUCOMA_LABELS
 from src.explainability.gradcam import CAM_METHODS
 from src.report import overlays
 from src.report.content import build_report_content
@@ -161,6 +177,14 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         glaucoma["probability"] * 100,
         ring_color=color,
     )
+    # Parity with DR's "Severity breakdown" expander -- this used to be the
+    # one place glaucoma's absent/present probability split was visible at
+    # all (buried in the old Report Preview walk, now merged away). Binary
+    # classifiers don't need DR's ordinal 5-row chart, just this 2-row one.
+    with st.expander("Detection breakdown"):
+        st.plotly_chart(
+            binary_probability_chart(glaucoma, GLAUCOMA_LABELS), width="stretch", config={"displayModeBar": False}
+        )
 
 
 def render_amd_section(amd: dict | None, cam_overlay) -> None:
@@ -177,6 +201,8 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
         amd["probability"] * 100,
         ring_color=color,
     )
+    with st.expander("Detection breakdown"):
+        st.plotly_chart(binary_probability_chart(amd, AMD_LABELS), width="stretch", config={"displayModeBar": False})
 
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
@@ -423,11 +449,18 @@ render_image_comparison(result)
 
 st.divider()
 
-# --- The "generation preview before export": a WYSIWYG mirror of the PDF,
-# built from and rendering the exact same ReportContent report/pdf.py
-# renders, not a separate description of it. ---
+# The Recommendation text is report/content.py's one synthesized, cross-
+# field summary (severity phrasing, the CDR-vs-classifier-disagreement
+# note when present, the disclaimer) -- not reproducible from the raw
+# pipeline dicts without duplicating that logic here, so it's still
+# sourced from build_report_content() exactly like the PDF is. Everything
+# else that Section list carries (quality metrics, before/after images,
+# per-detection text/tables/images, biomarker metrics/images) is NOT
+# re-rendered below -- see this module's docstring for why: it was a full
+# second copy of content already shown above.
 content = build_report_content(result)
-render_streamlit(content)
+recommendation = next(s for s in content.sections if s.title == "Recommendation")
+render_recommendation_card(recommendation.body)
 
 pdf_bytes = generate_pdf(content)
 st.download_button(
@@ -437,8 +470,9 @@ st.download_button(
     mime="application/pdf",
 )
 st.caption(
-    "To print: download the PDF above and print it (it's A4-formatted for "
-    "clean printing), or use your browser's Print (Ctrl/Cmd+P) on this page."
+    "The PDF includes everything above (quality, detections with "
+    "probability breakdowns, biomarkers, recommendation) in a print-formatted "
+    "layout, or use your browser's Print (Ctrl/Cmd+P) on this page."
 )
 # Reserves room at the very bottom of the page so the fixed disclaimer
 # footer doesn't sit on top of this last caption when scrolled all the way

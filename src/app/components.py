@@ -1,12 +1,12 @@
 """Dashboard visual design: small reusable HTML component renderers.
 
 Same pattern already used in app/progress.py (render_skeleton,
-render_error_card) and app/render_preview.py (the HTML table renderer):
-plain functions emitting markup via st.markdown(unsafe_allow_html=True),
-styled by the CSS classes theme.py defines (.vdx-ring-card, .vdx-pill,
-.vdx-datagrid, .vdx-stat-tile). Each is parameterized rather than bespoke
-per metric, so one ring/pill/grid/tile implementation covers every section
-in main.py.
+render_error_card): plain functions emitting markup via
+st.markdown(unsafe_allow_html=True), styled by the CSS classes theme.py
+defines (.vdx-ring-card, .vdx-pill, .vdx-datagrid, .vdx-stat-tile,
+.vdx-recommendation-card). Each is parameterized rather than bespoke per
+metric, so one ring/pill/grid/tile/card implementation covers every
+section in main.py.
 """
 
 import html
@@ -103,6 +103,25 @@ def render_stat_tile(
             <div class="vdx-ring-inner">{html.escape(ring_value)}</div>
         </div>
     </div>
+</div>""",
+        unsafe_allow_html=True,
+    )
+
+
+def render_recommendation_card(text: str) -> None:
+    """report/content.py's synthesized recommendation paragraph (severity
+    phrasing across all three detectors + the disclaimer, see
+    report/content.py's _build_recommendation()) is the one piece of the
+    old page-length Report Preview walk that wasn't already shown
+    elsewhere on the dashboard (see app/main.py's module docstring for the
+    rest of that story) -- given its own card here rather than a plain
+    st.markdown paragraph, since it's the closest thing this page has to
+    "the actual conclusion" and deserves to read that way.
+    """
+    st.markdown(
+        f"""<div class="vdx-recommendation-card">
+    <div class="vdx-recommendation-title">Recommendation</div>
+    <div class="vdx-recommendation-body">{html.escape(text)}</div>
 </div>""",
         unsafe_allow_html=True,
     )
