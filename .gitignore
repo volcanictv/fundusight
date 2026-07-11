@@ -5,6 +5,10 @@ DRIVE/
 STARE/
 CHASE_DB1/
 REFUGE2/
+ADAM/
+IDRiD/
+idrid_labels.csv
+SMDG, A Standardized Fundus Glaucoma Dataset/
 archive.zip
 *.pth
 *.pt

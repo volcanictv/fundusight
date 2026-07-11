@@ -182,6 +182,81 @@ disc/cup segmentation model. **Status: done** — see retrain results above.
 - Extend classifier to glaucoma (REFUGE) and AMD.
 - Cross-validate DR model against a second dataset (MESSIDOR or IDRiD) to demonstrate generalization — this is the detail that shows you understand why single-dataset results are weak evidence.
 
+**Dataset decisions (locked in, don't re-litigate without asking):** AMD uses
+ADAM (iChallenge-AMD, downloaded to `ADAM/Training400/`) — no separate
+val/test ships publicly, only a 400-image labeled training set, so a split
+will need to be carved out same as REFUGE2's Phase 6 pooling fix. Cross-dataset
+DR validation uses IDRiD, not MESSIDOR (`data/IDRi/`, 455 of the official
+516-image "B. Disease Grading" set — 88% complete, user has confirmed working
+with what's present is fine). **Note:** a full duplicate of the IDRiD data
+also exists at `IDRiD/` (repo root) — same 456 files as `data/IDRi/`, byte
+identical `idrid_labels.csv`. Only `data/IDRi/` is referenced by any code;
+the root-level `IDRiD/` duplicate hasn't been cleaned up (ask the user before
+deleting either copy).
+
+**Glaucoma classifier — code built and smoke-tested, real training NOT yet
+run.** Architecture: EfficientNet-B0, same pattern as the DR classifier (not
+the disc/cup U-Net — that's a separate Phase 6 model). Labels come from
+`REFUGE2/glaucoma_labels_merged.csv`, built by `scripts/build_glaucoma_labels.py`
+(merges REFUGE2's own `Refuge2_test.csv` — despite the name, it covers all
+three REFUGE2 domains — with SMDG-19's REFUGE1-train/REFUGE1-val rows,
+resolving internally-conflicting REFUGE2-csv duplicates via SMDG-19 where
+covered; see that script's docstring for the exact merge rules). If
+`REFUGE2/glaucoma_labels_merged.csv` is missing (REFUGE2/ is gitignored, so a
+fresh clone won't have it), regenerate with:
+```
+.venv\Scripts\python.exe scripts\build_glaucoma_labels.py
+```
+requires `REFUGE2/` and `SMDG, A Standardized Fundus Glaucoma Dataset/` both
+downloaded first (same non-committed-data convention as every other dataset
+here — see README).
+
+Code: `src/detection/glaucoma_dataset.py` (`build_pairs()`/`split_pairs()` —
+mirrors `src/segmentation/optic_disc_dataset.py`'s pooled/stratified-split
+pattern, but stratifies on a compound `{domain}_{label}` key, since glaucoma
+prevalence (~85/15) is a second imbalance beyond REFUGE2's three-camera-domain
+issue) and `src/detection/glaucoma_train.py` (mirrors
+`src/segmentation/optic_disc_train.py`'s structure; reuses
+`src/detection/model.py`'s `build_model(num_classes=2)` and
+`src/detection/dataset.py`'s `build_transforms()` directly — no duplicated
+model/transform code, which is also what keeps this swappable for the
+RETFound stretch goal mentioned below). Tests: `tests/detection/test_glaucoma_dataset.py`
+(5 tests, passing).
+
+Real-data split (verified 2026-07-11): 998 pooled labeled pairs → train=698,
+val=150, test=150, all three REFUGE2 camera domains represented in every
+split. A 1-epoch smoke test (GPU: RTX 4060) confirmed the full pipeline runs
+correctly end-to-end: epoch wall-clock 14.0s, val AUC 0.674, test AUC 0.679
+(weak — expected for 1 epoch, not a real result).
+`checkpoints/glaucoma_efficientnet_b0.pth` currently holds that 1-epoch
+smoke-test checkpoint, **not a trained model** — it'll be overwritten by a
+real run.
+
+**To resume training from a fresh session, just run:**
+```
+.venv\Scripts\python.exe src\detection\glaucoma_train.py --epochs 30
+```
+(30 is the script's default — override with `--epochs N` if a different
+budget is wanted; this hasn't been run for real yet, so there's no existing
+loss/AUC curve to compare against). Once done, evaluate the printed held-out
+test metrics (accuracy/AUC/F1/sensitivity/specificity) and update this
+section + `CLAUDE.md`'s "Current phase" line with the results, same as every
+other phase in this file.
+
+**Not started:** AMD classifier (will follow the same `build_model()`/
+`build_transforms()` pattern once ADAM's train/val/test split is carved out),
+IDRiD DR cross-validation (evaluation only, no training — run the existing
+`checkpoints/dr_efficientnet_b0.pth` against `data/IDRi/` and report how
+accuracy/AUC/kappa transfer).
+
+**Stretch goal reminder (not a Phase 7 blocker):** later, add RETFound
+(ViT-Large, MAE-pretrained on retinal images) as a comparison arm against
+EfficientNet-B0 across DR/glaucoma/AMD, via partial fine-tuning (freeze most
+of the backbone, unfreeze last few blocks + head — fits 8GB VRAM). Don't
+build it yet, but the glaucoma classifier code above was deliberately kept
+model-agnostic (`build_model(num_classes=...)` as the only task-specific
+call) so RETFound can slot in later without a rewrite.
+
 **Done when:** you have probability scores for all three diseases from one uploaded image.
 
 ## Phase 8 — Report Generation (week 11-12)

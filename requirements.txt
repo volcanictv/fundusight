@@ -8,6 +8,7 @@ torch>=2.2
 torchvision>=0.17
 numpy
 pandas
+openpyxl  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
 
 # Medical imaging utilities
 monai
