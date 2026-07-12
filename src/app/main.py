@@ -71,7 +71,7 @@ from src.app.charts import binary_probability_chart, probability_bar_chart
 from src.app.components import render_datagrid, render_recommendation_card, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
-from src.app.theme import inject_ambient_cursor, inject_css, render_header
+from src.app.theme import inject_ambient_cursor, inject_css, inject_image_zoom, render_header
 from src.detection.amd_infer import AMD_LABELS
 from src.detection.glaucoma_infer import GLAUCOMA_LABELS
 from src.explainability.gradcam import CAM_METHODS
@@ -83,6 +83,7 @@ from src.report.pipeline import run_pipeline
 st.set_page_config(page_title="VisionDx", page_icon="\U0001f441", layout="wide")
 inject_css()
 inject_ambient_cursor()
+inject_image_zoom()
 render_header()
 
 # CSS custom-property references, not hex literals -- theme.py's :root is
@@ -154,12 +155,18 @@ def render_preprocessing_section(preview: dict) -> None:
     # without bringing back a full duplicate walk -- Image Comparison still
     # covers the same two images individually at full size for closer
     # inspection, this is just the side-by-side "what changed" view.
-    _tile_label("Preprocessing")
-    before_col, after_col = st.columns(2)
-    with before_col:
-        st.image(_to_rgb(preview["before"]), caption="Original", width="stretch")
-    with after_col:
-        st.image(_to_rgb(preview["after"]), caption="Illumination + CLAHE + color norm.", width="stretch")
+    # Wrapped in the same glass card treatment as its Overview-row
+    # neighbor (the Image Quality ring+datagrid) -- a design-review pass
+    # flagged the Overview row's tiles as visually inconsistent, and this
+    # tile was the one still rendering as bare images/text directly on
+    # the page background instead of its own card.
+    with st.container(key="vdx-preprocessing-card"):
+        _tile_label("Preprocessing")
+        before_col, after_col = st.columns(2)
+        with before_col:
+            st.image(_to_rgb(preview["before"]), caption="Original", width="stretch")
+        with after_col:
+            st.image(_to_rgb(preview["after"]), caption="Illumination + CLAHE + color norm.", width="stretch")
 
 
 def render_detection_section(detection: dict | None, cam_overlay) -> None:
@@ -176,10 +183,14 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
         detection["probability"] * 100,
         ring_color=color,
     )
+    # Severity breakdown is now always visible, not tucked behind a
+    # collapsed expander -- a design-review pass flagged that the most
+    # informative view of a disease tile (the actual probability
+    # distribution) required an extra click nobody was prompted to make.
     # DR is 5-class (not binary like glaucoma/AMD) -- genuinely has more to
-    # show, so it alone gets an optional expander for the full distribution
-    # rather than forcing every disease tile into an identical shape.
-    with st.expander("Severity breakdown"):
+    # show, so it alone gets a 5-row chart rather than forcing every
+    # disease tile into an identical shape.
+    with st.container(key="vdx-chart-dr"):
         st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
         if cam_overlay is not None:
             # The tile itself only ever showed the pill+ring+chart -- the
@@ -204,11 +215,13 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         glaucoma["probability"] * 100,
         ring_color=color,
     )
-    # Parity with DR's "Severity breakdown" expander -- this used to be the
-    # one place glaucoma's absent/present probability split was visible at
-    # all (buried in the old Report Preview walk, now merged away). Binary
-    # classifiers don't need DR's ordinal 5-row chart, just this 2-row one.
-    with st.expander("Detection breakdown"):
+    # Parity with DR's breakdown chart -- this used to be the one place
+    # glaucoma's absent/present probability split was visible at all
+    # (buried in the old Report Preview walk, now merged away). Binary
+    # classifiers don't need DR's ordinal 5-row chart, just this 2-row
+    # one. Always visible, not behind an expander -- see render_detection_
+    # section()'s comment for why.
+    with st.container(key="vdx-chart-glaucoma"):
         st.plotly_chart(
             binary_probability_chart(glaucoma, GLAUCOMA_LABELS), width="stretch", config={"displayModeBar": False}
         )
@@ -230,7 +243,7 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
         amd["probability"] * 100,
         ring_color=color,
     )
-    with st.expander("Detection breakdown"):
+    with st.container(key="vdx-chart-amd"):
         st.plotly_chart(binary_probability_chart(amd, AMD_LABELS), width="stretch", config={"displayModeBar": False})
         if cam_overlay is not None:
             st.caption('Grad-CAM overlay: see "Grad-CAM (AMD)" in Image Comparison below.')
@@ -285,14 +298,37 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
         st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
 
 
+_MAX_COMPARISON_IMAGES_PER_ROW = 3
+
+
 def render_image_comparison(result: dict) -> None:
-    """A single unified image viewer switching between every view the
-    pipeline produced, via st.pills (real Streamlit widget state/rerun
-    handling -- not inert custom HTML buttons, which can't communicate
-    back to Python without a full custom component). Reuses arrays
-    already computed elsewhere in `result`/overlays.* rather than
-    recomputing anything. Now also the ONLY place Grad-CAM overlays are
-    shown at full size -- the disease tiles above no longer repeat them.
+    """A multi-select image viewer -- pick two or more views and see them
+    side by side simultaneously, via st.pills in multi-selection mode
+    (real Streamlit widget state/rerun handling -- not inert custom HTML
+    buttons, which can't communicate back to Python without a full custom
+    component). Reuses arrays already computed elsewhere in `result`/
+    overlays.* rather than recomputing anything. The ONLY place Grad-CAM
+    overlays are shown at full size -- the disease tiles above no longer
+    repeat them.
+
+    Replaces an earlier single-selection version of this viewer (one pill
+    active at a time, one image shown) -- a design-review pass pointed out
+    that comparing two views meant memorizing one while looking at the
+    other, not an actual side-by-side comparison. Multi-selection with
+    row-chunked columns (_MAX_COMPARISON_IMAGES_PER_ROW) handles any
+    number of simultaneously selected views without any of them getting
+    too narrow to read. Hover any image for a magnified view (theme.py's
+    .vdx-zoom-* rules, Amazon-product-page style) instead of Streamlit's
+    native fullscreen click-to-expand, which is no longer the primary way
+    to inspect these closely (the earlier fullscreen containing-block fix
+    stays in theme.py regardless, since fullscreen is still technically
+    reachable).
+
+    Also hosts the "Explainability method" selectbox -- it used to live in
+    the (now-removed) sidebar; this is the one place its choice actually
+    has a visible effect (which Grad-CAM overlays exist to pick from
+    below), so it's more discoverable here than buried in a settings
+    expander elsewhere on the page.
 
     Deliberately called only once the FULL pipeline result is available
     (see main flow below) rather than from inside on_stage -- some of
@@ -303,7 +339,12 @@ def render_image_comparison(result: dict) -> None:
     reasoning as why the Report Preview section only appears once
     `result` is final.
     """
-    st.subheader("Image Comparison")
+    header_col, method_col = st.columns([3, 1], vertical_alignment="bottom")
+    with header_col:
+        st.subheader("Image Comparison")
+    with method_col:
+        st.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
+
     images = {
         "Original": result["preprocessing_preview"]["before"],
         "Preprocessed": result["preprocessing_preview"]["after"],
@@ -318,10 +359,20 @@ def render_image_comparison(result: dict) -> None:
     images["Optic disc"] = overlays.optic_disc_overlay(result["working_image"], result["optic_disc"])
 
     options = list(images)
-    selected = st.pills("Compare views", options, selection_mode="single", default=options[0], key="image_compare")
-    if selected is None:
-        selected = options[0]
-    st.image(_to_rgb(images[selected]), width="stretch")
+    default_selection = options[:2]
+    st.caption("Select two or more views to compare them side by side. Hover an image to magnify.")
+    selected = st.pills(
+        "Compare views", options, selection_mode="multi", default=default_selection, key="image_compare"
+    )
+    if not selected:
+        selected = default_selection
+
+    for start in range(0, len(selected), _MAX_COMPARISON_IMAGES_PER_ROW):
+        chunk = selected[start : start + _MAX_COMPARISON_IMAGES_PER_ROW]
+        columns = st.columns(len(chunk))
+        for column, name in zip(columns, chunk):
+            with column:
+                st.image(_to_rgb(images[name]), caption=name, width="stretch")
 
 
 # stage_name -> (render function, extractor from the finished result dict).
@@ -396,11 +447,6 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Explainability method only matters once results exist -- kept in the
-# sidebar unconditionally (rather than folded into the intake panel below)
-# so it doesn't clutter a screen about *whether* to analyze an image with a
-# setting about *how* to explain the result once there is one.
-cam_method = st.sidebar.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
 
 
 def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
@@ -547,27 +593,35 @@ if not _started:
         st.rerun()
     st.stop()
 
-# Past the intake screen: the same three session-state-keyed inputs move
-# to a compact sidebar so patient ID / demo mode / the image source stay
-# changeable without bringing back the full-page intake panel every time
-# (see render_intake_screen()'s docstring).
-st.sidebar.header("Input")
-st.sidebar.text_input(
-    "Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id"
-)
-st.sidebar.toggle(
-    "Demo mode",
-    value=False,
-    help="Try the app on a locally available sample image instead of uploading your own.",
-    key="demo_mode",
-)
-effective_patient_id, image = _resolve_image_source(container=st.sidebar)
+st.header("Results")
+
+# No persistent sidebar in this design (removed per a design-review pass --
+# it was the one surface never re-themed to match everything else, and a
+# permanent side panel doesn't earn its keep once the wide layout below
+# doesn't need to share the viewport with it on every screen). Patient ID /
+# demo mode / the image source -- the same session-state-keyed controls
+# render_intake_screen() uses -- live in this collapsed-by-default expander
+# instead, reachable without bringing back the full-page intake panel.
+with st.expander("Change patient / image"):
+    st.text_input("Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id")
+    st.toggle(
+        "Demo mode",
+        value=False,
+        help="Try the app on a locally available sample image instead of uploading your own.",
+        key="demo_mode",
+    )
+    effective_patient_id, image = _resolve_image_source(container=st)
 
 if image is None:
-    st.info("Upload a fundus photo or turn on demo mode in the sidebar to get started.")
+    st.info('Upload a fundus photo or turn on demo mode under "Change patient / image" above to get started.')
     st.stop()
 
-st.header("Results")
+# Explainability method also used to live in the sidebar -- read here
+# (session_state already holds its current value from the previous run,
+# same pattern Streamlit widgets always rely on) since the pipeline needs
+# it before the actual selectbox widget renders further down, next to the
+# Image Comparison viewer its choice actually affects.
+cam_method = st.session_state.get("cam_method", next(iter(CAM_METHODS)))
 
 cache_key = (hashlib.md5(image.tobytes()).hexdigest(), effective_patient_id, cam_method)
 is_new_computation = st.session_state.get("_vdx_cache_key") != cache_key

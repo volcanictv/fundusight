@@ -119,19 +119,52 @@ _CSS = f"""
    `documentElement`, so this radial gradient's *position* tracks the
    cursor while its *color* stays strictly monochromatic (white fading to
    the near-white base, no hue) -- a faint light-following effect, not a
-   visible color gradient. `background-attachment: fixed` ties it to the
-   viewport (not scrolled content), matching the mouse coordinates' own
-   viewport-relative frame. The `50% 40%` fallback (before the first
+   visible color gradient. The `50% 40%` fallback (before the first
    mousemove fires, or with JS disabled) keeps it looking intentional, not
-   broken, in that split second. */
+   broken, in that split second.
+
+   The gradient itself lives on `.stApp::before`, a separate fixed
+   full-viewport layer BEHIND the real content, rather than directly on
+   `.stApp` -- a design-review pass asked for the glow to carry a frosted/
+   blurred glass quality, not just a soft-edged gradient. `filter: blur()`
+   affects an element's entire rendered output including its children, so
+   applying it straight to `.stApp` would blur the whole dashboard, not
+   just its background; a dedicated `::before` layer (z-index behind
+   everything, pointer-events disabled so it never intercepts clicks) lets
+   the blur apply to ONLY the glow itself. `.stApp` keeps the plain
+   background-color as a fallback base underneath.
+
+   CRITICAL: do NOT add `position: relative` (or any other value besides
+   the default `static`) to `.stApp` to "properly" scope this pseudo-
+   element -- it isn't needed (a `position: fixed` child resolves against
+   the viewport by default; it does NOT need its parent to be positioned,
+   unlike `position: absolute`), and adding it broke the entire app: a
+   first version of this rule added `position: relative` here, which made
+   `.stApp` the new nearest positioned ancestor for Streamlit's OWN
+   `stAppViewContainer` (which is `position: absolute` internally). That
+   silently changed stAppViewContainer's containing block, and the
+   dashboard rendered fine on first load (likely luck/caching) but went
+   completely blank after ANY rerun (confirmed live: toggling the demo-
+   mode switch was enough) -- DOM and computed styles all still reported
+   normal-looking values, making this very hard to spot; only a git-stash
+   bisect back to the last known-good commit conclusively isolated it to
+   this one declaration. Left undocumented, a future "cleanup" pass could
+   easily re-add it by habit. */
 .stApp {{
     background-color: var(--vdx-background);
+}}
+.stApp::before {{
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background-image: radial-gradient(
         circle 1500px at var(--vdx-mouse-x, 50%) var(--vdx-mouse-y, 40%),
         rgba(255, 255, 255, 1) 0%,
         rgba(255, 255, 255, 0) 75%
     );
-    background-attachment: fixed;
+    filter: blur(48px);
 }}
 
 html, body, [class*="css"] {{
@@ -180,6 +213,7 @@ hr {{
 div[data-testid="stMetric"],
 .vdx-ring-card,
 .vdx-stat-tile,
+.vdx-datagrid-card,
 div[data-testid="stExpander"] {{
     background: var(--vdx-glass);
     backdrop-filter: blur(24px);
@@ -391,14 +425,63 @@ div[data-testid="stExpander"] {{
     gap: 0.75rem;
 }}
 
+/* Each disease tile's probability-breakdown chart, always visible now
+   (see app/main.py's render_detection_section() et al. -- previously
+   tucked behind a collapsed st.expander that a design-review pass
+   flagged as hiding the most informative view of each tile behind an
+   unprompted extra click). Same glass card treatment as the tile above
+   it, in its own card rather than the expander's own (now-removed) one. */
+[class*="st-key-vdx-chart-"] {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--vdx-glass-border);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+    padding: 0.6rem 0.75rem 0.75rem;
+    margin-top: 0.6rem;
+}}
+
+/* The Preprocessing tile (Overview row) -- same glass card treatment as
+   its row neighbor, the Image Quality tile. Previously rendered as bare
+   images directly on the page background, the one Overview-row element
+   still without a card, which a design-review pass flagged as breaking
+   the row's visual harmony. */
+[class*="st-key-vdx-preprocessing-card"] {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--vdx-glass-border);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+    padding: 0.85rem 0.9rem;
+    height: 100%;
+    box-sizing: border-box;
+}}
+
 /* --- Compact data grid ---------------------------------------------------
    Secondary/detail numbers (see app/components.py's render_datagrid()) --
-   headline numbers stay in ring cards or st.metric tiles. */
+   headline numbers stay in ring cards or st.metric tiles. The card
+   wrapper (.vdx-datagrid-card, added to the shared glass surface list
+   above) is what gives this table a resolved bottom edge instead of
+   trailing off after the last row (see render_datagrid()'s docstring for
+   the full story) and matches the visual weight of the ring card it
+   usually sits beside. `height: 100%` + the flex parent's
+   `align-items: stretch` (Streamlit's own column default) lets it match
+   its neighboring ring-card's height rather than shrink-wrapping to just
+   its own (usually shorter) row count. */
+.vdx-datagrid-card {{
+    padding: 0.6rem 0.75rem;
+    height: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+}}
+
 .vdx-datagrid {{
     width: 100%;
     border-collapse: collapse;
     font-size: 0.82rem;
-    margin-top: 0.2rem;
 }}
 .vdx-datagrid tr:nth-child(even) {{
     background: rgba(255, 255, 255, 0.35);
@@ -420,11 +503,27 @@ div[data-testid="stExpander"] {{
     color: var(--vdx-text);
 }}
 
-/* --- Image hover-zoom ------------------------------------------------------
-   Targets Streamlit's own stImage wrapper directly. Scaling the <img>
-   itself (not the wrapper) inside an overflow:hidden card keeps the zoom
-   clipped to a fixed rounded frame, and keeps the caption (a sibling under
-   the image, not inside the scaled element) from zooming along with it. */
+/* --- Image hover-zoom (Amazon product-page style) --------------------------
+   Replaces an earlier, much milder hover effect (a flat 1.04x scale, no
+   cursor tracking) -- a design-review pass asked for a real magnifier:
+   hover an image and the region under the cursor zooms in, following the
+   cursor as it moves, no fullscreen transition needed. The zoom-in
+   trigger/reset itself is plain CSS `:hover` (native, instant, no JS
+   needed for that part); `inject_image_zoom()`'s JS (a CCv2 component,
+   see below) only continuously updates `transform-origin` to the
+   cursor's position WITHIN the hovered image via a delegated `mousemove`
+   listener, so the scaled-up view tracks whatever the cursor is over
+   rather than always zooming toward a fixed center point. Scaling the
+   <img> itself (not the wrapper) inside an overflow:hidden card keeps the
+   zoom clipped to the original frame, and keeps the caption (a sibling
+   under the image, not inside the scaled element) from zooming along
+   with it.
+
+   Streamlit's native fullscreen click-to-expand is still technically
+   reachable (its own button still renders) and the earlier containing-
+   block fix for it (see the vdxFadeInUp comment below) is deliberately
+   left in place defensively -- it's just no longer the primary way to
+   inspect an image closely here. */
 div[data-testid="stImage"] {{
     border-radius: 14px;
     overflow: hidden;
@@ -432,10 +531,12 @@ div[data-testid="stImage"] {{
 }}
 div[data-testid="stImage"] img {{
     display: block;
-    transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    transform-origin: 50% 50%;
+    transition: transform 0.15s ease-out;
+    cursor: zoom-in;
 }}
 div[data-testid="stImage"]:hover img {{
-    transform: scale(1.04);
+    transform: scale(2.2);
 }}
 
 /* --- Pills navigation (st.pills / st.segmented_control) --------------------
@@ -465,6 +566,22 @@ div[data-testid="stButtonGroup"] button {{
    own menu/deploy controls stay reachable. */
 .vdx-header-spacer {{
     height: 3.25rem;
+}}
+
+/* `.vdx-header-spacer` only reserves room for the fixed header in NORMAL
+   top-to-bottom document flow. It does nothing for scrollIntoView() /
+   keyboard-focus scrolling / anchor jumps, which can still land a target
+   element flush at the very top of the scroll container -- exactly where
+   the fixed header sits, hiding whatever scrolled there underneath it
+   (confirmed live: an automated scrollIntoView() on a button below the
+   fold left it positioned under this header, intercepting clicks meant
+   for it). `scroll-padding-top` fixes this at the browser level for any
+   scrolling method, not just the ones this app controls directly.
+   Streamlit's real scrollable container is `section.stMain`, not
+   `html`/`body` (confirmed live during an earlier investigation into
+   this app's fullscreen-image bug), so that's what needs the padding. */
+section.stMain {{
+    scroll-padding-top: 3.5rem;
 }}
 
 .vdx-header {{
@@ -1000,6 +1117,49 @@ def inject_ambient_cursor() -> None:
     value used.
     """
     _AMBIENT_CURSOR()
+
+
+# Separate component from _AMBIENT_CURSOR above (same "register once at
+# import time" pattern, same reasoning) -- distinct concern, kept modular
+# rather than folded into one do-everything mousemove handler.
+_IMAGE_ZOOM = st.components.v2.component(
+    "vdx_image_zoom",
+    js="""
+export default function (component) {
+    // The zoom-in/out TRIGGER is plain CSS `:hover` (see theme.py's
+    // `div[data-testid="stImage"]:hover img { transform: scale(2.2) }`)
+    // -- instant, no JS needed for that part. This only continuously
+    // updates WHERE the zoom centers, via transform-origin, so hovering
+    // near an image's top-left shows a magnified top-left rather than
+    // always zooming toward a fixed center point regardless of cursor
+    // position (an Amazon-product-page-style magnifier, not just a
+    // bigger image). Delegated off `document` (one listener total, not
+    // one per image) since Streamlit reruns can replace image elements
+    // between interactions.
+    const onMove = (e) => {
+        const img = e.target.closest('[data-testid="stImage"] img');
+        if (!img) return;
+        const rect = img.getBoundingClientRect();
+        const x = ((e.clientX - rect.left) / rect.width) * 100;
+        const y = ((e.clientY - rect.top) / rect.height) * 100;
+        img.style.transformOrigin = `${x}% ${y}%`;
+    };
+    document.addEventListener("mousemove", onMove);
+
+    return () => {
+        document.removeEventListener("mousemove", onMove);
+    };
+}
+""",
+)
+
+
+def inject_image_zoom() -> None:
+    """Call once per page load, anywhere after inject_css(). Pure JS side
+    effect (see _IMAGE_ZOOM above) -- no visible output, no return value
+    used.
+    """
+    _IMAGE_ZOOM()
 
 
 def render_header() -> None:

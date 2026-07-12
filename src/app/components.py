@@ -70,11 +70,27 @@ def render_datagrid(rows: list) -> None:
     render_stat_tile() cards; this is for the supporting rows (e.g. branch
     count, tortuosity, disc/cup diameters in px). `rows` is a list of
     (label, value) pairs, both coerced to str.
+
+    Wrapped in the same glass card treatment as render_ring()'s
+    .vdx-ring-card -- this table used to render as bare markup with no
+    enclosing card, and its own CSS (.vdx-datagrid tr:last-child td {
+    border-bottom: none }) deliberately drops the last row's bottom
+    border on the assumption a container's own border supplies the
+    table's visual "closing" edge. Without a container, that assumption
+    didn't hold: the table just trailed off into blank page background
+    after the last row, reading as a cut-off/clipped table even though
+    nothing was actually being clipped (confirmed live -- the DOM/overflow
+    chain had no hidden overflow anywhere; every row was fully rendered
+    and present, just visually unresolved at the bottom). This card gives
+    it the closing edge that rule always assumed existed.
     """
     body = "".join(
         f"<tr><td>{html.escape(str(label))}</td><td>{html.escape(str(value))}</td></tr>" for label, value in rows
     )
-    st.markdown(f'<table class="vdx-datagrid"><tbody>{body}</tbody></table>', unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="vdx-datagrid-card"><table class="vdx-datagrid"><tbody>{body}</tbody></table></div>',
+        unsafe_allow_html=True,
+    )
 
 
 def render_stat_tile(
