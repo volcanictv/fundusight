@@ -50,6 +50,12 @@ tests/                unit tests, mirrors src/ structure
 - Don't silently swap in a different dataset/model than what's specified in the current roadmap phase — flag it and ask first.
 - Trained model weights are large — never commit them to git. Reference download/regeneration instructions in README instead.
 
+## Git workflow
+
+- `master` is the stable branch: what Streamlit Community Cloud deploys from and what recruiters/portfolio viewers see live. It should always work.
+- `dev` is the active-work branch — commit and experiment there. Merge (or PR) into `master` only once a change is tested and polished.
+- Exception: a live-production incident (e.g. the deployed app crashing) gets fixed directly on `master`, since that's the only branch Streamlit Cloud actually redeploys — fixes pushed to `dev` alone won't get tested against the real crash. Sync `dev` back up (fast-forward is usually enough) once `master` is stable again.
+
 ## Working with Claude Code on this repo
 
 - Use Plan Mode before touching more than 2-3 files.
