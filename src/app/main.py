@@ -666,6 +666,7 @@ if not _started:
     st.stop()
 
 st.header("Results")
+_diag("'Results' header rendered, entering 'Change patient / image' expander")
 
 # Same session-state-keyed controls render_intake_screen() uses, collapsed
 # by default so they're reachable without bringing back the full-page
@@ -678,7 +679,9 @@ with st.expander("Change patient / image", icon=":material/edit:"):
         help="Try the app on a locally available sample image instead of uploading your own.",
         key="demo_mode",
     )
+    _diag("about to call _resolve_image_source() (2nd call site)")
     effective_patient_id, image = _resolve_image_source()
+    _diag(f"_resolve_image_source() returned, image is None: {image is None}")
 
 if image is None:
     st.info('Upload a fundus photo or turn on demo mode under "Change patient / image" above to get started.')
@@ -689,18 +692,24 @@ if image is None:
 # further down, next to the Image Comparison viewer its choice affects,
 # renders.
 cam_method = st.session_state.get("cam_method", next(iter(CAM_METHODS)))
+_diag(f"cam_method={cam_method!r}, image.shape={image.shape}, image.dtype={image.dtype} -- about to hash")
 
 cache_key = (hashlib.md5(image.tobytes()).hexdigest(), effective_patient_id, cam_method)
+_diag(f"cache_key computed: {cache_key}")
 is_new_computation = st.session_state.get("_fdx_cache_key") != cache_key
+_diag(f"is_new_computation={is_new_computation}")
 
 if is_new_computation:
     # Created first, before any section placeholder: position: fixed keeps
     # it pinned to the viewport regardless of scroll, but creating it after
     # the placeholders instead put the grid above it in DOM order, leaving
     # the banner off-screen below real content once scrolled past the header.
+    _diag("is_new_computation True -- constructing ProgressBanner()")
     banner = ProgressBanner()
+    _diag("ProgressBanner() constructed -- calling _create_stage_placeholders()")
 
     placeholders = _create_stage_placeholders()
+    _diag("_create_stage_placeholders() returned")
 
     def on_stage(stage_name, value):
         _diag(f"pipeline stage completed: {stage_name}")
