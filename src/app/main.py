@@ -37,9 +37,27 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+# Set before any numpy/opencv/torch import below -- native libraries read
+# these once, at load time, so setting them later has no effect. Both
+# mitigate a well-documented native-crash class when OpenCV and PyTorch run
+# in the same process (see explainability/gradcam.py's generate_cam(),
+# which calls into both within one function: a torch forward/backward pass
+# immediately followed by cv2 resize/color-convert calls for the overlay).
+# Each library can bundle/initialize its own OpenMP runtime and its own
+# internal thread pool, and two live at once in one process is a known
+# segfault source -- not something guardable from Python once it happens,
+# only preventable by not letting the conflict arise in the first place.
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+
 import cv2
 import numpy as np
 import streamlit as st
+
+# Disables OpenCV's own internal thread pool, for the same reason as the
+# env vars above. A global, process-wide setting -- runs once here even
+# though cv2 is imported in many other modules throughout this pipeline.
+cv2.setNumThreads(0)
 
 from src.app.charts import binary_probability_chart, probability_bar_chart
 from src.app.checkpoints import fetch_checkpoints
