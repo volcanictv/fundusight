@@ -10,10 +10,10 @@ dashboard.
 output here should be treated as clinical advice.
 
 This README is a snapshot of what's built and what it actually measures.
-`ROADMAP.md` has the full phase-by-phase build log (including work still in
-progress), and `DEEP_DIVE.md` has longer write-ups of specific
-investigations referenced below. `CLAUDE.md` documents repo conventions for
-anyone (human or Claude Code) working on this codebase.
+`ROADMAP.md` has the full phase-by-phase build log, and `DEEP_DIVE.md` has
+longer write-ups of specific investigations referenced below. `CLAUDE.md` is
+a dev-history/conventions doc from when this was built with Claude Code —
+useful background, not an active instruction file.
 
 ## What this project demonstrates
 
@@ -162,35 +162,57 @@ no classical fallback and simply don't appear in the report/app.
 
 ## Deployment
 
-Since checkpoints are never committed to git, a fresh deployment (or a
-fresh clone that hasn't trained anything locally) starts with none. The app
-fetches them itself: `src/app/main.py` calls `fetch_checkpoints()`
-(`src/app/checkpoints.py`) once per process on startup, which downloads the
-five checkpoints inference needs from this repo's GitHub Releases assets
-into `checkpoints/` — existing local files are never re-fetched, so a dev
+This is meant to be deployed once, as a live portfolio demo, via [Streamlit
+Community Cloud](https://share.streamlit.io), which builds an app straight
+from a GitHub repository URL — no separate server or hosting account to
+manage. Since checkpoints are never committed to git (see "Trained
+weights" above), a fresh deploy starts with none locally; the app fetches
+them itself from this repo's GitHub Releases assets.
+
+**How the checkpoint fetch works:** `src/app/main.py` calls
+`fetch_checkpoints()` (`src/app/checkpoints.py`) once per process on
+startup, which downloads the five checkpoints inference needs into
+`checkpoints/` — existing local files are never re-fetched, so a dev
 machine that already trained its own checkpoints makes zero network calls.
 A failed fetch (offline, release not published yet) degrades the same way a
-missing checkpoint always has — the affected section/fallback, not a
-crash — rather than blocking startup.
+missing checkpoint always has — the affected section falls back or
+disappears, not a crash.
 
-To publish new checkpoints after retraining, create/update the GitHub
-Release the app points at (`v1.0.0` by default — see
-`src/app/checkpoints.py`'s `DEFAULT_REPO`/`DEFAULT_TAG`):
-```
-gh release create v1.0.0 checkpoints/dr_efficientnet_b0.pth \
-    checkpoints/glaucoma_efficientnet_b0.pth checkpoints/amd_efficientnet_b0.pth \
-    checkpoints/vessel_unet.pth checkpoints/optic_disc_unet.pth \
-    --title "v1.0.0" --notes "Fundusight v1.0.0 trained checkpoints"
-```
-To pre-fetch outside the app (e.g. as a separate deployment build step)
-instead of relying on the app's own startup fetch:
+**Steps to deploy this repo yourself, end to end:**
+
+1. Push the repo to GitHub (already done here:
+   `https://github.com/volcanictv/fundusight`).
+2. Publish trained checkpoints as GitHub Release assets — one-time, this is
+   what step "1" above downloads from:
+   ```
+   gh release create v1.0.0 checkpoints/dr_efficientnet_b0.pth \
+       checkpoints/glaucoma_efficientnet_b0.pth checkpoints/amd_efficientnet_b0.pth \
+       checkpoints/vessel_unet.pth checkpoints/optic_disc_unet.pth \
+       --title "v1.0.0" --notes "Fundusight v1.0.0 trained checkpoints"
+   ```
+   (Requires the [`gh` CLI](https://cli.github.com/), logged in, run from
+   the repo root with the checkpoints present locally.)
+3. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with
+   GitHub.
+4. Click **"New app"** and point it at this repo by URL:
+   - **Repository:** `volcanictv/fundusight`
+   - **Branch:** `master`
+   - **Main file path:** `src/app/main.py`
+5. Click **"Deploy"**. Streamlit Cloud clones the repo from that GitHub
+   URL, installs `requirements.txt`, and runs the app; on first load it
+   fetches the five checkpoints from the GitHub Release created in step 2
+   automatically — nothing to configure by hand beyond the repo URL itself.
+
+To pre-fetch checkpoints outside the app (e.g. to test the fetch locally
+before deploying) instead of relying on the app's own startup fetch:
 ```
 .venv\Scripts\python.exe scripts\fetch_checkpoints.py
 ```
-GitHub Releases was chosen over Hugging Face Hub for this: the repo already
-lives on GitHub, every checkpoint here is well under GitHub's 2GB
-per-asset limit, and it avoids adding a second hosting account/dependency
-for six files.
+
+GitHub Releases was chosen over Hugging Face Hub for hosting the
+checkpoints: the repo already lives on GitHub, every checkpoint here is
+well under GitHub's 2GB per-asset limit, and it avoids adding a second
+hosting account/dependency for five files.
 
 ## Running the app
 
@@ -209,14 +231,6 @@ demo mode needs that dataset already downloaded per setup step 2 above.
 Runs the full suite (`tests/`, mirrors `src/` structure). Tests use small
 real or synthetic sample images and don't require the full datasets to be
 downloaded or hit the network.
-
-## Running Claude Code on this repo
-
-From the repo root:
-```
-claude
-```
-Claude Code will automatically pick up `CLAUDE.md` for project context. Use Plan Mode (Shift+Tab) before large changes, and `/model opusplan` when you want Opus to plan and Sonnet to execute.
 
 ## Project structure
 
