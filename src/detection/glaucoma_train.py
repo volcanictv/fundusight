@@ -141,9 +141,6 @@ def main():
 
     model = build_model(num_classes=2, pretrained=True).to(device)
 
-    # Inverse-frequency class weights: glaucoma is ~85/15 imbalanced, same
-    # rationale as src/detection/dataset.py's compute_class_weights() for DR
-    # severity classes.
     class_weights = compute_class_weights(train_pairs).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

@@ -168,12 +168,12 @@ def generate_pdf(content: ReportContent) -> bytes:
         rightMargin=_PAGE_MARGIN,
         topMargin=_PAGE_MARGIN,
         bottomMargin=_PAGE_MARGIN,
-        title=f"VisionDx Report - {content.patient_id}",
+        title=f"Fundusight Report - {content.patient_id}",
     )
     styles = _styles()
 
     flowables = [
-        _p("VisionDx Analysis Report", styles["title"]),
+        _p("Fundusight Analysis Report", styles["title"]),
         _p(f"Patient: {content.patient_id}  ·  Generated: {content.timestamp}", styles["meta"]),
         _p(content.disclaimer, styles["meta"]),
     ]

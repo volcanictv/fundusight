@@ -131,8 +131,6 @@ def main():
 
     model = build_model(num_classes=2, pretrained=True).to(device)
 
-    # Inverse-frequency class weights: AMD is ~78/22 imbalanced, same
-    # rationale as glaucoma_train.py.
     class_weights = compute_class_weights(train_pairs).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

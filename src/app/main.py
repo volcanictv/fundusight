@@ -75,6 +75,7 @@ import numpy as np
 import streamlit as st
 
 from src.app.charts import binary_probability_chart, probability_bar_chart
+from src.app.checkpoints import fetch_checkpoints
 from src.app.components import render_datagrid, render_recommendation_card, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
@@ -87,7 +88,20 @@ from src.report.content import build_report_content
 from src.report.pdf import generate_pdf
 from src.report.pipeline import run_pipeline
 
-st.set_page_config(page_title="VisionDx", page_icon="\U0001f441", layout="wide")
+
+@st.cache_resource(show_spinner="Fetching trained model checkpoints...")
+def _ensure_checkpoints() -> list[str]:
+    """Runs once per process (st.cache_resource) — a fresh deployment with no
+    local checkpoints/ fetches them from the GitHub Release on first load; a
+    dev machine that already has them locally makes no network calls at all.
+    """
+    return fetch_checkpoints()
+
+
+# set_page_config must be the first Streamlit command in the script, so the
+# (cached, spinner-showing) checkpoint fetch has to come after it.
+st.set_page_config(page_title="Fundusight", page_icon="\U0001f441", layout="wide")
+_ensure_checkpoints()
 inject_css()
 inject_ambient_cursor()
 inject_image_zoom()

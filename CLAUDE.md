@@ -1,8 +1,17 @@
-# VisionDx
+# Fundusight
 
 AI-assisted retinal disease analysis pipeline (fundus photo → quality check → preprocessing → disease detection → explainability → biomarker extraction → report). Educational/portfolio project, not a clinical/diagnostic tool — don't let generated copy (UI text, report language, docstrings) imply otherwise.
 
 See ROADMAP.md for the full phased plan and DEEP_DIVE.md for longer write-ups of specific investigations/results (e.g. the Phase 6 macula heuristic validation). Update the "Current phase" line below as you progress.
+
+**v1.0.0 ship-prep (2026-07-12):** project renamed from its dev codename
+VisionDx to Fundusight (README/ROADMAP/app UI/PDF report), git history
+audited (nothing large or dataset/checkpoint-related was ever committed —
+clean), `.gitignore` tightened, dead code/over-explaining comments cleaned
+up, `requirements.txt` pinned to tested versions, and a GitHub-Releases
+checkpoint-fetch mechanism (`src/app/checkpoints.py`,
+`scripts/fetch_checkpoints.py`) added so a deployed instance with no local
+checkpoints can still run inference. Tagged `v1.0.0`.
 
 **Current phase:** Phase 8/9 done — PDF report generation (`src/report/`) + Streamlit dashboard (`src/app/`). Phase 6 is now done — the optic-disc/cup U-Net has been retrained on the pooled/re-split REFUGE2 data (2026-07-11): held-out test Dice `dice_rim=0.8937 dice_cup=0.8576 mean=0.8756`, up from the old domain-split checkpoint's `mean=0.5599` (see ROADMAP.md's Phase 6, which also now covers a 2026-07-12 validation of the macula/fovea heuristic against real ADAM ground truth — see DEEP_DIVE.md for the full write-up: it's unreliable outside REFUGE2-like framing, root cause identified). Phase 7 (multi-disease + multi-dataset) is fully done, including app integration. Glaucoma classifier (2026-07-11, EfficientNet-B0): held-out test `accuracy=0.7400 auc=0.8304 f1=0.4179 sensitivity=0.7778 specificity=0.7348`, best checkpoint at epoch 6/30 by val AUC. AMD classifier (2026-07-12, EfficientNet-B0): held-out test `accuracy=0.9167 auc=0.8887 f1=0.8000 sensitivity=0.7692 specificity=0.9574`, best checkpoint at epoch 30/30 by val AUC. IDRiD cross-dataset DR validation (2026-07-12, evaluation only): the APTOS-trained DR model scores accuracy=0.5429/auc=0.8398/kappa=0.7640 on IDRiD, vs its 83.9%/0.925/0.889 on APTOS itself — a real, expected generalization gap where AUC/kappa (ranking/ordinal signal) hold up much better than raw accuracy. Both classifiers are now wired into `src/detection/glaucoma_infer.py`/`amd_infer.py`, `report/pipeline.py`, `report/content.py`, and the Streamlit app (2026-07-12) — verified end-to-end in the real running app, not just tests. See ROADMAP.md's Phase 7 section for full breakdowns, confusion matrices, and the app-integration details.
 

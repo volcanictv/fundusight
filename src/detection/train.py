@@ -101,10 +101,6 @@ def main():
 
     model = build_model(num_classes=NUM_CLASSES, pretrained=True).to(device)
 
-    # Inverse-frequency class weights: DR severity classes are imbalanced
-    # (roughly half the training set is "No DR"), so an unweighted loss would
-    # let the model get a deceptively good accuracy by mostly predicting the
-    # majority class.
     class_weights = compute_class_weights(train_csv).to(device)
     criterion = nn.CrossEntropyLoss(weight=class_weights)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)

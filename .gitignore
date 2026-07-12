@@ -7,9 +7,11 @@ CHASE_DB1/
 REFUGE2/
 ADAM/
 IDRiD/
+AIROGS-Light/
 idrid_labels.csv
 SMDG, A Standardized Fundus Glaucoma Dataset/
 archive.zip
+checkpoints/
 *.pth
 *.pt
 *.ckpt
@@ -22,6 +24,7 @@ __pycache__/
 *.pyc
 .venv/
 .ipynb_checkpoints/
+.pytest_cache/
 
 # os
 .DS_Store
@@ -30,4 +33,5 @@ __pycache__/
 scripts/*.png
 
 # training run logs
+logs/
 *.log

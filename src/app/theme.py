@@ -680,42 +680,6 @@ section.stMain {{
     box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
 }}
 
-/* --- Sidebar ---------------------------------------------------------
-   A design-review pass caught this: every other surface (the intake
-   panel, result tiles, the recommendation card) got the glass treatment,
-   but the persistent sidebar (explainability method once results exist,
-   or the full compact input set) was left as bare default Streamlit --
-   a flat gray panel with plain black-bordered widgets, no blur, no accent
-   color on focus. Since the sidebar is visible on every screen, that gap
-   undermined the "whole frontend" redesign more than any single
-   component would. Same glass material as the rest of the app, and its
-   own selectbox/text input/toggle re-themed to match what main.py's
-   intake-panel versions of those same widgets already look like. */
-[data-testid="stSidebar"] {{
-    background: var(--vdx-glass);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
-    border-right: 1px solid var(--vdx-glass-border);
-}}
-[data-testid="stSidebar"] [data-testid="stTextInput"] input,
-[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
-    background: rgba(255, 255, 255, 0.6) !important;
-    border: 1px solid rgba(0, 0, 0, 0.1) !important;
-    border-radius: 12px !important;
-}}
-[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {{
-    border-color: var(--vdx-primary) !important;
-    box-shadow: 0 0 0 3px rgba(53, 37, 205, 0.15) !important;
-}}
-[data-testid="stSidebar"] button[aria-checked="true"][role="switch"] {{
-    background-color: var(--vdx-primary) !important;
-}}
-[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {{
-    background: rgba(53, 37, 205, 0.03) !important;
-    border: 2px dashed var(--vdx-rule) !important;
-    border-radius: 14px !important;
-}}
-
 /* --- Intake panel -----------------------------------------------------
    The centered "Patient Intake & Signal Acquisition" glass panel shown
    before an image is available (see app/main.py's render_intake_screen())
@@ -1233,7 +1197,7 @@ def render_header() -> None:
     st.markdown(
         """<div class="vdx-header-spacer"></div>
 <div class="vdx-header">
-    <span class="vdx-header-logo">VisionDx</span>
+    <span class="vdx-header-logo">Fundusight</span>
 </div>""",
         unsafe_allow_html=True,
     )

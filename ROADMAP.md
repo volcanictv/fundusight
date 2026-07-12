@@ -1,4 +1,4 @@
-# VisionDx — Project Roadmap
+# Fundusight — Project Roadmap
 
 AI-assisted retinal disease analysis pipeline. Educational/portfolio project — not a diagnostic device, not for clinical use.
 

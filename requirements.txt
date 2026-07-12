@@ -1,35 +1,42 @@
 # Core
 # NOTE: `pip install -r requirements.txt` alone installs the CPU-only build of
-# torch/torchvision. For local GPU training, install the CUDA build FIRST:
+# torch/torchvision (correct for inference/app deployment). For local GPU
+# training, install the CUDA build FIRST:
 #   pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-# then run `pip install -r requirements.txt` — pip will see torch/torchvision
-# already satisfied and leave them alone.
-torch>=2.2
-torchvision>=0.17
-numpy
-pandas
-openpyxl  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
+# then run `pip install -r requirements.txt` — pip matches the public version
+# (2.11.0/0.26.0) regardless of the +cu128 local build tag, so it's satisfied
+# and leaves the CUDA build in place.
+torch==2.11.0
+torchvision==0.26.0
+numpy==2.5.1
+pandas==3.0.3
+openpyxl==3.1.5  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
 
 # Medical imaging utilities
-monai
+monai==1.6.0
 
 # Classical CV
-opencv-python
-scikit-image
+opencv-python==5.0.0.93
+scikit-image==0.26.0
 
 # Explainability
-grad-cam
+grad-cam==1.5.5
 
 # Metrics (quadratic weighted kappa, AUC)
-scikit-learn
+scikit-learn==1.9.0
 
 # App / viz
-streamlit
-plotly
+streamlit==1.59.1
+plotly==6.8.0
 
 # Reporting
-reportlab
+reportlab==5.0.0
 
 # Dev
-pytest
-tqdm
+pytest==9.1.1
+tqdm==4.68.4
+
+# Deployment: fetches trained checkpoints from GitHub Releases at runtime
+# (see fetch_checkpoints.py / README's "Deployment" section — checkpoints are
+# gitignored and never committed, so a fresh deploy has none locally).
+requests==2.32.3
