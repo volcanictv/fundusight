@@ -1,13 +1,31 @@
 # Core
-# NOTE: `pip install -r requirements.txt` alone installs the CPU-only build of
-# torch/torchvision (correct for inference/app deployment). For local GPU
-# training, install the CUDA build FIRST:
+# NOTE: pinned to the explicit +cpu build, from PyTorch's own CPU-only wheel
+# index, not the bare "torch==2.11.0" this file used to have. Plain PyPI's
+# default torch wheel is CUDA-bundled (confirmed live: a fresh Streamlit
+# Community Cloud deploy resolved unpinned "torch==2.11.0" to torch+cu130,
+# pulling in a full nvidia-cublas/cudnn/nvtx/etc. stack on a container with
+# no GPU -- CUDA runtime init/device probing with no actual driver present
+# is a well-documented native segfault source, and matches this project's
+# exact incident: the deployed app segfaulted specifically after torch
+# finished importing, with import itself taking 10-30s -- much longer than
+# a CPU-only wheel needs, consistent with CUDA driver-stub loading). The
+# extra-index-url below is ADDED alongside PyPI (not `--index-url`, which
+# would replace PyPI outright and break every other dependency in this
+# file), and only supplies +cpu-tagged wheels, so pinning the exact +cpu
+# local version leaves no ambiguity for the resolver to pick the CUDA
+# build instead.
+#
+# For local GPU training this flips the old order: this file now installs
+# the CPU build, so install requirements.txt FIRST, then install the CUDA
+# build OVER it for training:
+#   pip install -r requirements.txt
 #   pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-# then run `pip install -r requirements.txt` — pip matches the public version
-# (2.11.0/0.26.0) regardless of the +cu128 local build tag, so it's satisfied
-# and leaves the CUDA build in place.
-torch==2.11.0
-torchvision==0.26.0
+# Re-running `pip install -r requirements.txt` after that reverts back to
+# the CPU build (the pin is now exact, not just the public version), so do
+# that reinstall last, right before training.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.11.0+cpu
+torchvision==0.26.0+cpu
 numpy==2.5.1
 pandas==3.0.3
 openpyxl==3.1.5  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
