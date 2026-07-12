@@ -25,6 +25,12 @@ _PRIMARY_INK = "#191C1E"
 _MUTED_INK = "#464555"
 _GRIDLINE = "#C7C4D8"
 
+# Plotly's own default (~12px) read noticeably smaller than the surrounding
+# page's own text at these chart sizes -- bumped so category labels and the
+# on-bar percentage values are as legible as everything else in a stat tile.
+_LABEL_FONT_SIZE = 14  # category labels (y-axis) and the on-bar value labels
+_AXIS_FONT_SIZE = 12  # the 0%/50%/100% x-axis scale -- secondary to the above
+
 # A genuine 0.0% bar renders with no visible mark -- indistinguishable at a
 # glance from a missing/broken data row (the label just floats at the left
 # margin with no bar next to it). This is a DISPLAY-only floor on the drawn
@@ -61,7 +67,7 @@ def probability_bar_chart(detection: dict) -> go.Figure:
             marker=dict(color=_ORDINAL_RAMP, cornerradius=4),
             text=text_labels,
             textposition="outside",
-            textfont=dict(color=text_colors),
+            textfont=dict(color=text_colors, size=_LABEL_FONT_SIZE),
             customdata=true_values,
             cliponaxis=False,
             hovertemplate="%{y}: %{customdata:.1f}%<extra></extra>",
@@ -76,7 +82,7 @@ def probability_bar_chart(detection: dict) -> go.Figure:
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK),
+        font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK, size=_LABEL_FONT_SIZE),
         bargap=0.35,  # air around each bar -- never fill the category slot
         xaxis=dict(
             range=[0, 112],
@@ -85,9 +91,13 @@ def probability_bar_chart(detection: dict) -> go.Figure:
             ticksuffix="%",
             zeroline=False,
             showline=False,
-            tickfont=dict(color=_MUTED_INK),
+            tickfont=dict(color=_MUTED_INK, size=_AXIS_FONT_SIZE),
         ),
-        yaxis=dict(autorange="reversed", showgrid=False, tickfont=dict(color=_PRIMARY_INK)),
+        yaxis=dict(
+            autorange="reversed",
+            showgrid=False,
+            tickfont=dict(color=_PRIMARY_INK, size=_LABEL_FONT_SIZE),
+        ),
         showlegend=False,
     )
     return figure
@@ -129,7 +139,7 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
             marker=dict(color=bar_colors, cornerradius=4),
             text=text_labels,
             textposition="outside",
-            textfont=dict(color=text_colors),
+            textfont=dict(color=text_colors, size=_LABEL_FONT_SIZE),
             customdata=true_values,
             cliponaxis=False,
             hovertemplate="%{y}: %{customdata:.1f}%<extra></extra>",
@@ -141,7 +151,7 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK),
+        font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK, size=_LABEL_FONT_SIZE),
         bargap=0.45,
         xaxis=dict(
             range=[0, 112],
@@ -150,9 +160,13 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
             ticksuffix="%",
             zeroline=False,
             showline=False,
-            tickfont=dict(color=_MUTED_INK),
+            tickfont=dict(color=_MUTED_INK, size=_AXIS_FONT_SIZE),
         ),
-        yaxis=dict(autorange="reversed", showgrid=False, tickfont=dict(color=_PRIMARY_INK)),
+        yaxis=dict(
+            autorange="reversed",
+            showgrid=False,
+            tickfont=dict(color=_PRIMARY_INK, size=_LABEL_FONT_SIZE),
+        ),
         showlegend=False,
     )
     return figure

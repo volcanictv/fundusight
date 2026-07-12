@@ -320,7 +320,27 @@ def render_image_comparison(result: dict) -> None:
     images["Optic disc"] = overlays.optic_disc_overlay(result["working_image"], result["optic_disc"])
 
     options = list(images)
-    default_selection = options[:2]
+    # A sensible default -- one raw view, one explainability heatmap, one
+    # biomarker overlay -- rather than dict-insertion order's first two
+    # entries (always "Original"/"Preprocessed", leaving the viewer never
+    # showing anything the pipeline actually detected until the user
+    # picked something themselves). Exactly one name per category, first
+    # available in each -- not a single flat priority list, which would
+    # pick two Grad-CAMs over a biomarker overlay whenever more than one
+    # detector's checkpoint is present.
+    default_selection = []
+    if "Original" in images:
+        default_selection.append("Original")
+    for name in ("Grad-CAM (DR)", "Grad-CAM (Glaucoma)", "Grad-CAM (AMD)"):
+        if name in images:
+            default_selection.append(name)
+            break
+    for name in ("Optic disc", "Vessel mask"):
+        if name in images:
+            default_selection.append(name)
+            break
+    if len(default_selection) < 3:
+        default_selection = options[:3]
     # Explainability method sits directly beside the pills it controls,
     # rather than up near the "Image Comparison" heading, so the
     # relationship reads as clearly connected.

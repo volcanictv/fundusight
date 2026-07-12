@@ -62,15 +62,30 @@ _CSS = f"""
 /* Material Symbols Outlined needs all FOUR variable-font axes (opsz,
    wght, FILL, GRAD) requested in the @import -- three silently fails to
    apply at all, leaving every hand-inserted `material-symbols-outlined`
-   span (e.g. the intake dropzone's upload icon) rendering as literal
-   fallback text ("cloud_upload") instead of a glyph. Also `display=block`
-   here, not `swap` like the text fonts above: this is a ligature-based
-   icon font, so "swap" briefly (or, if the request fails, permanently)
-   shows the raw icon NAME as text; "block" hides the fallback instead.
-   Streamlit's own `icon=":material/...":` shorthand (used on st.button
-   below) bundles its own copy of this font and is unaffected -- only the
-   manually-inserted spans are. */
-@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
+   span rendering as literal fallback text instead of a glyph. `display=
+   block` here, not `swap` like the text fonts above: this is a
+   ligature-based icon font, so `swap` would immediately show the raw icon
+   NAME as text while the font loads; `block` keeps it invisible for a
+   short period first.
+
+   `icon_names=cloud_upload` subsets the request to only the one icon this
+   app's hand-inserted span actually uses (the intake dropzone's upload
+   icon -- see main.py) -- Material Symbols' full glyph set is a ~960KB
+   font regardless of how narrow the FILL/GRAD/opsz/wght axis values
+   requested are (those axes select which static instance of the variable
+   font to serve, not which glyphs), so without icon_names every page load
+   fetches the entire icon set to render one character. Subsetted, this
+   request returns low single-digit KB, which reliably finishes inside
+   `block`'s invisible window instead of racing it. Streamlit's own
+   `icon=":material/...":` shorthand (used on st.button below) bundles its
+   own font locally and needs neither this @import nor icon_names.
+
+   CRITICAL: adding a new hand-inserted `material-symbols-outlined` span
+   with a different icon name requires adding that name to `icon_names`
+   here too (comma-separated, alphabetically sorted -- the API 400s
+   otherwise) -- an icon not listed here will fall back to literal text
+   forever, not degrade to the slow-but-working full-font request. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&icon_names=cloud_upload&display=block');
 
 :root {{
     --fdx-primary: {_PRIMARY};
@@ -353,8 +368,8 @@ div[data-testid="stExpander"] {{
 
 .fdx-ring {{
     position: relative;
-    width: 84px;
-    height: 84px;
+    width: 108px;
+    height: 108px;
     border-radius: 50%;
     background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--fdx-track) 0);
     box-shadow: inset 0 1px 3px rgba(20, 23, 30, 0.15);
@@ -363,7 +378,7 @@ div[data-testid="stExpander"] {{
 
 .fdx-ring-inner {{
     position: absolute;
-    inset: 11px;
+    inset: 14px;
     border-radius: 50%;
     background: var(--fdx-glass);
     box-shadow: inset 0 1px 2px rgba(20, 23, 30, 0.12);
@@ -371,12 +386,12 @@ div[data-testid="stExpander"] {{
     place-items: center;
     font-family: var(--fdx-font-mono);
     font-weight: 600;
-    font-size: 0.92rem;
+    font-size: 1.18rem;
     color: var(--fdx-text);
 }}
 
 .fdx-ring-label {{
-    font-size: 0.66rem;
+    font-size: 0.72rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.045em;
@@ -518,22 +533,24 @@ div[data-testid="stExpander"] {{
 
 /* --- Image hover-zoom (Amazon product-page style) --------------------------
    Hover an image and the region under the cursor zooms in, following the
-   cursor as it moves, no fullscreen transition needed. The zoom-in
-   trigger/reset itself is plain CSS `:hover` (native, instant, no JS
-   needed for that part); `inject_image_zoom()`'s JS (a CCv2 component,
-   see below) only continuously updates `transform-origin` to the
-   cursor's position WITHIN the hovered image via a delegated `mousemove`
-   listener, so the scaled-up view tracks whatever the cursor is over
-   rather than always zooming toward a fixed center point. Scaling the
-   <img> itself (not the wrapper) inside an overflow:hidden card keeps the
-   zoom clipped to the original frame, and keeps the caption (a sibling
-   under the image, not inside the scaled element) from zooming along
-   with it.
+   cursor as it moves, no fullscreen transition needed. Scaling the <img>
+   itself (not the wrapper) inside an overflow:hidden card keeps the zoom
+   clipped to the original frame, and keeps the caption (a sibling under
+   the image, not inside the scaled element) from zooming along with it.
 
-   Streamlit's native fullscreen click-to-expand is still technically
-   reachable (its own button still renders), and the containing-block fix
-   for it (see the fdxFadeInUp comment below) stays in place defensively --
-   it's just no longer the primary way to inspect an image closely here. */
+   The zoom is triggered by a JS-toggled `.fdx-zoom-active` class, NOT
+   plain CSS `:hover` -- `:hover` was tried first and is wrong here:
+   Chromium re-evaluates `:hover` by hit-testing the CURRENT layout against
+   the pointer's last known position, with no real mouse movement required.
+   Streamlit reruns constantly replace what's under a stationary cursor
+   (e.g. the "Initialize analysis" button disappears and a results image
+   renders in roughly the same spot) -- confirmed live: an image can render
+   already stuck at 2.2x zoom with the mouse never having moved near it,
+   because the cursor happened to be resting where that image's box ended
+   up. `inject_image_zoom()`'s JS (below) instead adds/removes this class
+   only from inside a real `mousemove` handler, which by definition cannot
+   fire without genuine pointer movement, so a rerun can never leave an
+   image pre-zoomed. */
 div[data-testid="stImage"] {{
     border-radius: 14px;
     overflow: hidden;
@@ -545,7 +562,7 @@ div[data-testid="stImage"] img {{
     transition: transform 0.15s ease-out;
     cursor: zoom-in;
 }}
-div[data-testid="stImage"]:hover img {{
+div[data-testid="stImage"] img.fdx-zoom-active {{
     transform: scale(2.2);
 }}
 
@@ -553,12 +570,35 @@ div[data-testid="stImage"]:hover img {{
    Both widgets share one underlying component, data-testid
    "stButtonGroup". Styled as a rounded segmented track on the glass
    material; the selected-pill accent fill comes from Streamlit's own
-   aria-checked/data-selected state on the inner button. */
+   aria-checked/data-selected state on the inner button.
+
+   `width: 100%` is required here -- without it this element sizes to its
+   own content (the buttons), not its container, so with fewer than
+   enough options to fill a row (e.g. the Image Comparison pills) the
+   whole track renders narrower than the section it sits in instead of
+   spanning it. `box-sizing: border-box` keeps the padding above from
+   pushing the true rendered width past 100%.
+
+   That alone isn't sufficient, though: this element's own wrapping
+   Streamlit container (`[data-testid="stElementContainer"]`, generated
+   for every widget) ALSO sizes to content by default rather than
+   stretching to ITS parent -- confirmed live: with only the rule above,
+   stButtonGroup correctly filled its immediate parent, but that parent
+   was itself still only as wide as the buttons (777px of an available
+   1200px column). Targeted via the "image_compare" `key=` main.py's
+   st.pills() call already sets, rather than a blanket
+   stElementContainer rule, since that class is shared by every widget
+   on the page. */
+[class*="st-key-image_compare"] {{
+    width: 100%;
+}}
 div[data-testid="stButtonGroup"] {{
     background: var(--fdx-track);
     padding: 0.22rem;
     border-radius: 999px;
     gap: 0.15rem;
+    width: 100%;
+    box-sizing: border-box;
 }}
 div[data-testid="stButtonGroup"] button {{
     border-radius: 999px !important;
@@ -1082,27 +1122,42 @@ _IMAGE_ZOOM = st.components.v2.component(
     "fdx_image_zoom",
     js="""
 export default function (component) {
-    // The zoom-in/out TRIGGER is plain CSS `:hover` (see theme.py's
-    // `div[data-testid="stImage"]:hover img { transform: scale(2.2) }`)
-    // -- instant, no JS needed for that part. This only continuously
-    // updates WHERE the zoom centers, via transform-origin, so hovering
-    // near an image's top-left shows a magnified top-left rather than
-    // always zooming toward a fixed center point (an Amazon-product-page
-    // -style magnifier, not just a bigger image). Delegated off
-    // `document` (one listener total, not one per image) since Streamlit
-    // reruns can replace image elements between interactions.
+    // The zoom TRIGGER is this handler adding/removing `.fdx-zoom-active`
+    // (see theme.py's CSS) -- deliberately NOT plain CSS `:hover`, which
+    // Chromium re-evaluates against the pointer's last position whenever
+    // layout changes, even with no real mouse movement (see theme.py's
+    // comment on this rule for the bug that caused live). Gating the class
+    // on an actual `mousemove` event means it can only ever be applied
+    // while the pointer is demonstrably over the image right now.
+    //
+    // Also continuously updates WHERE the zoom centers, via
+    // transform-origin, so hovering near an image's top-left shows a
+    // magnified top-left rather than always zooming toward a fixed center
+    // point (an Amazon-product-page-style magnifier, not just a bigger
+    // image). Delegated off `document` (one listener total, not one per
+    // image) since Streamlit reruns can replace image elements between
+    // interactions.
+    let activeImg = null;
+
     const onMove = (e) => {
         const img = e.target.closest('[data-testid="stImage"] img');
-        if (!img) return;
-        const rect = img.getBoundingClientRect();
-        const x = ((e.clientX - rect.left) / rect.width) * 100;
-        const y = ((e.clientY - rect.top) / rect.height) * 100;
-        img.style.transformOrigin = `${x}% ${y}%`;
+        if (img !== activeImg) {
+            if (activeImg) activeImg.classList.remove("fdx-zoom-active");
+            if (img) img.classList.add("fdx-zoom-active");
+            activeImg = img;
+        }
+        if (img) {
+            const rect = img.getBoundingClientRect();
+            const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const y = ((e.clientY - rect.top) / rect.height) * 100;
+            img.style.transformOrigin = `${x}% ${y}%`;
+        }
     };
     document.addEventListener("mousemove", onMove);
 
     return () => {
         document.removeEventListener("mousemove", onMove);
+        if (activeImg) activeImg.classList.remove("fdx-zoom-active");
     };
 }
 """,
