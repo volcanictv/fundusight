@@ -26,6 +26,24 @@ import html
 import os
 import re
 import sys
+import time
+
+# --- TEMPORARY DIAGNOSTIC INSTRUMENTATION -----------------------------
+# Bisecting a segfault in the deployed container (run-streamlit.sh's
+# "Segmentation fault", no Python traceback -- SIGSEGV kills the process
+# before Python-level error handling ever runs, so the only visibility
+# into WHERE it happens is whatever got printed and flushed beforehand).
+# Remove this whole block (and the _diag() calls below) once the crash is
+# isolated to a specific import/step -- this is not meant to stay.
+_diag_t0 = time.time()
+
+
+def _diag(msg: str) -> None:
+    print(f"[DIAG +{time.time() - _diag_t0:.2f}s] {msg}", flush=True)
+
+
+_diag("main.py execution started")
+# --- end temporary instrumentation (continued below, inline) ----------
 
 # Streamlit Community Cloud runs the `streamlit` executable directly rather
 # than `python -m streamlit`, so unlike the local dev invocation (see the
@@ -50,28 +68,86 @@ if _PROJECT_ROOT not in sys.path:
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-import cv2
+_diag("importing numpy")
 import numpy as np
+
+_diag(f"numpy {np.__version__} imported -- dumping np.show_runtime() (SIMD/CPU dispatch info)")
+try:
+    np.show_runtime()
+except Exception as exc:  # pragma: no cover -- diagnostic only
+    _diag(f"np.show_runtime() raised (non-fatal): {exc!r}")
+_diag("np.show_runtime() returned without crashing")
+
+_diag("importing cv2")
+import cv2
+
+_diag(f"cv2 {cv2.__version__} imported")
+
+_diag("importing streamlit")
 import streamlit as st
+
+_diag("streamlit imported")
 
 # Disables OpenCV's own internal thread pool, for the same reason as the
 # env vars above. A global, process-wide setting -- runs once here even
 # though cv2 is imported in many other modules throughout this pipeline.
 cv2.setNumThreads(0)
 
+_diag("importing torch")
+import torch
+
+_diag(f"torch {torch.__version__} imported")
+
+_diag("importing torchvision")
+import torchvision
+
+_diag(f"torchvision {torchvision.__version__} imported")
+
+_diag("importing monai")
+import monai
+
+_diag(f"monai {monai.__version__} imported")
+
+_diag("importing src.app.charts")
 from src.app.charts import binary_probability_chart, probability_bar_chart
+
+_diag("importing src.app.checkpoints")
 from src.app.checkpoints import fetch_checkpoints
+
+_diag("importing src.app.components")
 from src.app.components import render_datagrid, render_recommendation_card, render_ring, render_stat_tile
+
+_diag("importing src.app.demo_data")
 from src.app.demo_data import list_demo_images, load_demo_image
+
+_diag("importing src.app.progress")
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
+
+_diag("importing src.app.theme")
 from src.app.theme import inject_ambient_cursor, inject_css, inject_image_zoom, render_header
+
+_diag("importing src.detection.amd_infer")
 from src.detection.amd_infer import AMD_LABELS
+
+_diag("importing src.detection.glaucoma_infer")
 from src.detection.glaucoma_infer import GLAUCOMA_LABELS
+
+_diag("importing src.explainability.gradcam")
 from src.explainability.gradcam import CAM_METHODS
+
+_diag("importing src.report.overlays")
 from src.report import overlays
+
+_diag("importing src.report.content")
 from src.report.content import build_report_content
+
+_diag("importing src.report.pdf")
 from src.report.pdf import generate_pdf
+
+_diag("importing src.report.pipeline")
 from src.report.pipeline import run_pipeline
+
+_diag("ALL IMPORTS COMPLETE")
 
 
 @st.cache_resource(show_spinner="Fetching trained model checkpoints...")
@@ -86,11 +162,14 @@ def _ensure_checkpoints() -> list[str]:
 # set_page_config must be the first Streamlit command in the script, so the
 # (cached, spinner-showing) checkpoint fetch has to come after it.
 st.set_page_config(page_title="Fundusight", page_icon="\U0001f7e3", layout="wide")
+_diag("set_page_config done, fetching checkpoints")
 _ensure_checkpoints()
+_diag("checkpoints ensured, injecting CSS/JS")
 inject_css()
 inject_ambient_cursor()
 inject_image_zoom()
 render_header()
+_diag("header rendered -- reached the intake/results branch")
 
 # CSS custom-property references, not hex literals -- theme.py's :root is
 # the single source of truth for these two accent colors; every caller here
@@ -624,11 +703,13 @@ if is_new_computation:
     placeholders = _create_stage_placeholders()
 
     def on_stage(stage_name, value):
+        _diag(f"pipeline stage completed: {stage_name}")
         banner.advance(stage_name)
         args = value if isinstance(value, tuple) else (value,)
         with placeholders[stage_name].container(key=f"fdx-section-{stage_name}-content"):
             _RENDER_BY_STAGE[stage_name](*args)
 
+    _diag("calling run_pipeline() -- this is the 'analysis starts' trigger")
     try:
         result = run_pipeline(
             image, patient_id=effective_patient_id, cam_method=cam_method, on_stage=on_stage
