@@ -45,7 +45,6 @@ tests/                unit tests, mirrors src/ structure
 
 ## Conventions
 
-- I'm learning to code — when a change involves a new concept or pattern I haven't used yet, add a short comment explaining *why*, not just what.
 - Prefer small, single-purpose functions over large ones; this is a pipeline of independent stages, keep them independently testable.
 - Every new pipeline stage (quality check, preprocessing step, detector, segmenter) gets at least one test with a real or synthetic sample image before moving to the next phase.
 - Don't silently swap in a different dataset/model than what's specified in the current roadmap phase — flag it and ask first.
