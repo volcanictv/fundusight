@@ -22,10 +22,14 @@ monai==1.6.0
 # installs both, and they collide over the same cv2/ package directory.
 # The GUI build's libGL.so.1 dependency (missing on minimal deployment
 # containers, e.g. Streamlit Community Cloud) is supplied instead via
-# packages.txt at the repo root, which installs libgl1/libglib2.0-0 via
+# packages.txt at the repo root, which installs libgl1/libglib2.0-0t64 via
 # apt -- packages.txt itself must stay comment-free: unlike this file,
 # Streamlit Cloud's packages.txt installer doesn't strip '#' lines and
-# instead tries to apt-get install every word in them literally.
+# instead tries to apt-get install every word in them literally. The t64
+# suffix matters: Streamlit Cloud's container mixes bullseye-security and
+# trixie apt sources, and trixie renamed libglib2.0-0 to libglib2.0-0t64
+# (the 64-bit time_t transition) -- the old name resolves to a bullseye
+# build that depends on libffi7, which isn't installable from trixie.
 opencv-python==5.0.0.93
 scikit-image==0.26.0
 
