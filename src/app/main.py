@@ -29,6 +29,20 @@ via render_recommendation_card() (components.py) instead of being buried at
 the bottom of a page-length duplicate. app/render_preview.py is deleted
 along with it; nothing else imported its Section-walking helpers.
 
+Third redesign pass ("Clinical Liquid Glass"): the whole visual language --
+colors, fonts, glass treatment, icons -- was replaced wholesale to match a
+Stitch-generated reference mockup the user supplied directly (`Front-End
+Template/stitch_visiondx_retinal_screening_dashboard/`), not iterated on
+from scratch. See theme.py's module docstring for the token-level
+rationale. Structurally, this pass also replaces the old sidebar-only
+intake controls (patient ID / demo toggle / uploader, permanently pinned
+in `st.sidebar`) with a centered "Patient Intake & Signal Acquisition"
+glass panel (render_intake_screen(), below) shown before an image is
+available -- the reference mockup's one concrete screen, reproduced
+directly. The sidebar still holds one setting (explainability method)
+that only matters once results exist, so it stays there rather than
+cluttering the intake panel with a control that isn't relevant yet.
+
 v2 (kept): the pipeline runs progressively, not behind one opaque spinner.
 Each stage still gets its own st.empty() placeholder, filled the moment it
 finishes (via report/pipeline.run_pipeline()'s on_stage callback), behind a
@@ -57,7 +71,7 @@ from src.app.charts import binary_probability_chart, probability_bar_chart
 from src.app.components import render_datagrid, render_recommendation_card, render_ring, render_stat_tile
 from src.app.demo_data import list_demo_images, load_demo_image
 from src.app.progress import ProgressBanner, render_error_card, render_skeleton
-from src.app.theme import inject_ambient_cursor, inject_css
+from src.app.theme import inject_ambient_cursor, inject_css, render_header
 from src.detection.amd_infer import AMD_LABELS
 from src.detection.glaucoma_infer import GLAUCOMA_LABELS
 from src.explainability.gradcam import CAM_METHODS
@@ -69,12 +83,13 @@ from src.report.pipeline import run_pipeline
 st.set_page_config(page_title="VisionDx", page_icon="\U0001f441", layout="wide")
 inject_css()
 inject_ambient_cursor()
+render_header()
 
 # CSS custom-property references, not hex literals -- theme.py's :root is
 # the single source of truth for these two accent colors; every caller here
 # just points at it rather than duplicating hex values.
-_TEAL = "var(--vdx-teal)"
-_COPPER = "var(--vdx-copper)"
+_PRIMARY = "var(--vdx-primary)"
+_TERTIARY = "var(--vdx-tertiary)"
 
 
 def _to_rgb(array: np.ndarray) -> np.ndarray:
@@ -114,7 +129,7 @@ def _unavailable_tile(title: str) -> None:
 
 def render_quality_section(quality: dict) -> None:
     _tile_label("Image Quality")
-    color = _TEAL if quality["passed"] else _COPPER
+    color = _PRIMARY if quality["passed"] else _TERTIARY
     ring_col, grid_col = st.columns([1, 1])
     with ring_col:
         render_ring("Quality", f"{quality['score']:.0f}", quality["score"], color=color)
@@ -152,7 +167,7 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
         _unavailable_tile("Diabetic Retinopathy")
         return
     variant = "normal" if detection["class_idx"] == 0 else "attention"
-    color = _TEAL if variant == "normal" else _COPPER
+    color = _PRIMARY if variant == "normal" else _TERTIARY
     render_stat_tile(
         "Diabetic Retinopathy",
         detection["label"],
@@ -180,7 +195,7 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         _unavailable_tile("Glaucoma")
         return
     variant = "normal" if glaucoma["class_idx"] == 0 else "attention"
-    color = _TEAL if variant == "normal" else _COPPER
+    color = _PRIMARY if variant == "normal" else _TERTIARY
     render_stat_tile(
         "Glaucoma",
         glaucoma["label"],
@@ -206,7 +221,7 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
         _unavailable_tile("AMD")
         return
     variant = "normal" if amd["class_idx"] == 0 else "attention"
-    color = _TEAL if variant == "normal" else _COPPER
+    color = _PRIMARY if variant == "normal" else _TERTIARY
     render_stat_tile(
         "AMD",
         amd["label"],
@@ -231,7 +246,7 @@ def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> Non
     _tile_label("Vessel Biomarkers")
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
-        render_ring("Density", f"{vessel_result['vessel_density']:.1f}%", vessel_result["vessel_density"], color=_TEAL)
+        render_ring("Density", f"{vessel_result['vessel_density']:.1f}%", vessel_result["vessel_density"], color=_PRIMARY)
     with grid_col:
         render_datagrid(
             [
@@ -250,7 +265,7 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
     cdr = optic_disc_result["vertical_cdr"]
     # Same 0.5 elevated-CDR threshold report/content.py's recommendation
     # text already uses -- an educational observation, not a diagnosis.
-    ring_color = _COPPER if cdr >= 0.5 else _TEAL
+    ring_color = _TERTIARY if cdr >= 0.5 else _PRIMARY
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
         render_ring("Vertical CDR", f"{cdr:.2f}", cdr * 100, color=ring_color)
@@ -370,7 +385,6 @@ def _render_all_sections(result: dict) -> None:
                     _RENDER_BY_STAGE[stage](*_EXTRACT_BY_STAGE[stage](result))
 
 
-st.title("VisionDx")
 # A floating footer instead of an inline caption -- doesn't interrupt the
 # page's flow. Fixed + centered + bounded-width, same proven pattern as
 # the progress banner (see theme.py's comment on .vdx-progress-banner for
@@ -382,40 +396,152 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Sidebar: every input control lives here, so the main column stays
-# results-only. Also what the @media print rule in theme.py hides. ---
+# Explainability method only matters once results exist -- kept in the
+# sidebar unconditionally (rather than folded into the intake panel below)
+# so it doesn't clutter a screen about *whether* to analyze an image with a
+# setting about *how* to explain the result once there is one.
+cam_method = st.sidebar.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
+
+
+def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
+    """Demo-sample picker or file uploader, whichever `demo_mode` (already
+    rendered by the caller) selects. `container` is `st` (main area) or
+    `st.sidebar` -- same two widgets either way, just placed differently
+    depending on render_intake_screen() vs. the compact sidebar path below.
+    """
+    patient_id_input = st.session_state.get("patient_id", "")
+    effective_patient_id = patient_id_input
+    image = None
+
+    if st.session_state.get("demo_mode"):
+        demo_images = list_demo_images()
+        if not demo_images:
+            container.info("No local demo images found — download APTOS 2019 per the README to use demo mode.")
+        else:
+            options = {f"{item['label']} — {item['id_code']}": item for item in demo_images}
+            choice = container.selectbox("Sample image", list(options), key="demo_sample")
+            selected = options[choice]
+            image = load_demo_image(selected["path"])
+            if not effective_patient_id:
+                effective_patient_id = f"DEMO-{selected['id_code']}"
+    else:
+        uploaded = container.file_uploader(
+            "Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader"
+        )
+        if uploaded is not None:
+            image = _decode_upload(uploaded)
+
+    return effective_patient_id, image
+
+
+def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
+    """The centered "Patient Intake & Signal Acquisition" glass panel --
+    the Clinical Liquid Glass reference mockup's one concrete screen,
+    reproduced directly (see this module's docstring). Shown only before
+    the user has both picked an image source AND clicked "Initialize
+    analysis" for the first time this session; after that, the same
+    session-state-keyed controls move to a compact sidebar instead (see
+    the call site below) so they stay reachable without this panel taking
+    over the page every time settings change.
+
+    Returns (effective_patient_id, image, initialize_clicked).
+    """
+    with st.container(key="vdx-intake-panel"):
+        left_col, right_col = st.columns([5, 7], gap="large")
+
+        with left_col:
+            st.markdown(
+                '<span class="vdx-intake-eyebrow">System entry portal</span>'
+                '<h2 style="margin-top: 0.4rem;">Patient intake &amp; signal acquisition</h2>'
+                '<p class="vdx-intake-description">Upload a fundus photo or enter patient '
+                "details to run the automated screening pipeline (quality check, disease "
+                "detection, biomarkers, and a recommendation summary).</p>",
+                unsafe_allow_html=True,
+            )
+            st.markdown('<div style="height: 0.5rem"></div>', unsafe_allow_html=True)
+            with st.container(key="vdx-intake-toggle-row"):
+                label_col, toggle_col = st.columns([4, 1], vertical_alignment="center")
+                with label_col:
+                    st.markdown(
+                        '<div class="vdx-intake-toggle-label">Demo mode</div>'
+                        '<div class="vdx-intake-toggle-sublabel">Use a local sample image</div>',
+                        unsafe_allow_html=True,
+                    )
+                with toggle_col:
+                    st.toggle(
+                        "Demo mode",
+                        value=False,
+                        key="demo_mode",
+                        label_visibility="collapsed",
+                        help="Try the app on a locally available sample image instead of uploading your own.",
+                    )
+
+        with right_col:
+            st.markdown('<span class="vdx-field-label">Patient ID / reference</span>', unsafe_allow_html=True)
+            st.text_input(
+                "Patient ID / reference",
+                value="",
+                placeholder="e.g. DEMO-001",
+                key="patient_id",
+                label_visibility="collapsed",
+            )
+            if not st.session_state.get("demo_mode"):
+                st.markdown(
+                    '<p style="font-family: var(--vdx-font-display); font-weight: 700; '
+                    'font-size: 1.05rem; margin: 0.75rem 0 0.15rem;">Drop a fundus photo here</p>'
+                    '<p class="vdx-caption" style="margin-bottom: 0.5rem;">PNG, JPG, or JPEG</p>',
+                    unsafe_allow_html=True,
+                )
+            effective_patient_id, image = _resolve_image_source(container=st)
+
+            st.markdown('<div style="height: 0.75rem"></div>', unsafe_allow_html=True)
+            initialize_clicked = st.button(
+                "Initialize analysis",
+                type="primary",
+                width="stretch",
+                icon=":material/rocket_launch:",
+                disabled=image is None,
+                key="initialize_btn",
+            )
+
+        st.divider()
+        status_col, _ = st.columns([1, 1])
+        with status_col:
+            st.markdown(
+                '<div class="vdx-header-status">'
+                '<span class="vdx-status-dot"></span>'
+                "<span>Core engine ready</span>"
+                "</div>",
+                unsafe_allow_html=True,
+            )
+
+    return effective_patient_id, image, initialize_clicked
+
+
+_started = st.session_state.get("_vdx_started", False)
+
+if not _started:
+    effective_patient_id, image, initialize_clicked = render_intake_screen()
+    if image is not None and initialize_clicked:
+        st.session_state["_vdx_started"] = True
+        st.rerun()
+    st.stop()
+
+# Past the intake screen: the same three session-state-keyed inputs move
+# to a compact sidebar so patient ID / demo mode / the image source stay
+# changeable without bringing back the full-page intake panel every time
+# (see render_intake_screen()'s docstring).
 st.sidebar.header("Input")
-patient_id_input = st.sidebar.text_input(
+st.sidebar.text_input(
     "Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id"
 )
-demo_mode = st.sidebar.toggle(
+st.sidebar.toggle(
     "Demo mode",
     value=False,
     help="Try the app on a locally available sample image instead of uploading your own.",
     key="demo_mode",
 )
-cam_method = st.sidebar.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
-
-image = None
-effective_patient_id = patient_id_input
-
-if demo_mode:
-    demo_images = list_demo_images()
-    if not demo_images:
-        st.sidebar.info("No local demo images found — download APTOS 2019 per the README to use demo mode.")
-    else:
-        options = {f"{item['label']} — {item['id_code']}": item for item in demo_images}
-        choice = st.sidebar.selectbox("Sample image", list(options), key="demo_sample")
-        selected = options[choice]
-        image = load_demo_image(selected["path"])
-        if not effective_patient_id:
-            effective_patient_id = f"DEMO-{selected['id_code']}"
-else:
-    uploaded = st.sidebar.file_uploader(
-        "Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader"
-    )
-    if uploaded is not None:
-        image = _decode_upload(uploaded)
+effective_patient_id, image = _resolve_image_source(container=st.sidebar)
 
 if image is None:
     st.info("Upload a fundus photo or turn on demo mode in the sidebar to get started.")

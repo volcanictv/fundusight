@@ -1,17 +1,37 @@
 """Phase 9 / redesign: dashboard visual theme.
 
-A dense, glass-surfaced "instrument panel" look: frosted white cards
-(backdrop-filter blur + saturation boost, the trick that makes Apple's own
-frosted materials read as "alive" rather than washed out) float over a
-softly two-toned light background, with a warm copper / deep teal accent
-duo drawn from the subject itself -- copper for the optic disc's pale
-warm tissue and "a finding is present," teal for fundus-imaging equipment's
-characteristic blue-green and "normal/calm." Streamlit has no first-class
-theming API expressive enough for this (its config.toml theme only covers
-a handful of colors), so this injects scoped CSS instead -- targeting
-Streamlit's `data-testid` attributes rather than its generated class
-names, since those are the one part of its DOM that's meant to be a
-stable styling hook across versions.
+"Clinical Liquid Glass" -- adopted from a Stitch-generated reference mockup
+the user supplied directly (`Front-End Template/stitch_visiondx_retinal_
+screening_dashboard/`: DESIGN.md + code.html + screen.png), which redoes
+the app's whole visual language, not just a component or two. Replaces the
+prior copper/teal "instrument panel" system wholesale:
+
+- Indigo (#3525CD, "primary") replaces teal as the single primary accent --
+  buttons, links, the "normal/no finding" semantic, focus rings. A sky-blue
+  secondary (#0EA5E9) covers neutral/informational accents. A burnt-orange
+  tertiary (#A44100) replaces copper for "a finding is present" -- similar
+  warm-attention role, re-hued to the new family rather than dropped.
+- Hanken Grotesk (headlines) + Inter (body) + Geist (small mono-ish labels/
+  data) replace Fraunces/Inter/JetBrains Mono -- matching the reference's
+  actual Google Fonts import exactly (its DESIGN.md prose says Manrope/
+  JetBrains Mono, but its own code.html loads Hanken Grotesk/Inter/Geist;
+  code.html is the literal rendered artifact behind screen.png, so it's
+  ground truth here, not the prose doc).
+- Frost-white background (#F7F9FB, was #ECEEF3) with the same glass-card
+  mechanics as before (translucent white + blur), just re-tuned toward the
+  reference's "luminous edge" look: a soft black hairline border
+  (rgba(0,0,0,0.08), the reference's own `border-luminous` token) and a
+  large, very soft ambient shadow, rather than the previous saturate-boost
+  + white-border combination.
+- Material Symbols Outlined icons (settings, cloud_upload, rocket_launch,
+  etc.) replace the previous no-icon convention, matching the reference's
+  icon usage in its header/dropzone/buttons.
+
+Streamlit has no first-class theming API expressive enough for this (its
+config.toml theme only covers a handful of colors), so this injects scoped
+CSS instead -- targeting Streamlit's `data-testid` attributes rather than
+its generated class names, since those are the one part of its DOM that's
+meant to be a stable styling hook across versions.
 
 Deliberately NOT applied to report/pdf.py's ReportLab output -- that's a
 separate, print-optimized renderer (ink-conscious, A4) where glass/blur/
@@ -22,48 +42,60 @@ Section list, so they can never disagree on *content*, only presentation.
 
 import streamlit as st
 
-# Same accent family as report/pdf.py's restrained palette in spirit, but
-# re-hued for the glass theme -- see module docstring for why copper/teal,
-# not the old flat blue/emerald/amber trio.
-_TEAL = "#0E7C86"  # primary accent: buttons, links, progress fill, "normal" status
-_COPPER = "#B3611A"  # "a finding is present" / attention status, used sparingly
-_INFO = "#5B6B7A"  # neutral/informational pill, deliberately quiet -- not a 3rd loud accent
-_TEXT = "#1A1D23"
-_MUTED = "#5F6570"
-_BORDER = "#DCE0E7"
-_BACKGROUND = "#ECEEF3"
-_GLASS = "rgba(255, 255, 255, 0.72)"
-_GLASS_BORDER = "rgba(255, 255, 255, 0.85)"
-_TRACK = "rgba(255, 255, 255, 0.5)"
+# "Clinical Liquid Glass" palette -- see module docstring for where these
+# come from. Named by ROLE (primary/secondary/tertiary), not by hue, so a
+# future re-hue doesn't leave a misleading name behind the way the old
+# "_TEAL"/"_COPPER" constants would have here.
+_PRIMARY = "#3525CD"  # indigo -- single primary accent: buttons, links, progress fill, "normal" status
+_PRIMARY_CONTAINER = "#4F46E5"  # lighter indigo -- hover/active states, "Initialize" button base
+_SECONDARY = "#0EA5E9"  # sky blue -- neutral/informational accent, not a status verdict
+_TERTIARY = "#A44100"  # burnt orange -- "a finding is present" / attention status, used sparingly
+_ERROR = "#BA1A1A"  # real app/pipeline errors -- distinct from the clinical "attention" tertiary
+_TEXT = "#191C1E"
+_MUTED = "#464555"
+_OUTLINE = "#C7C4D8"  # hairline borders, dividers
+_BACKGROUND = "#F7F9FB"
+_GLASS = "rgba(255, 255, 255, 0.7)"
+_GLASS_BORDER = "rgba(0, 0, 0, 0.08)"  # the reference's "border-luminous" token
+_TRACK = "rgba(0, 0, 0, 0.06)"
 
 _CSS = f"""
 <style>
-/* Inter (UI/prose) + JetBrains Mono (numeric data) stay -- both already
-   doing their job well, no reason to churn a typeface that works. Fraunces
-   (a variable serif with warm, slightly editorial terminals) is new: used
-   only for the page title, section headers, and each disease tile's
-   verdict line -- an "authored report" register contrasted deliberately
-   against the cold, precise mono used for raw numbers. This is the one
-   real typographic risk this redesign takes; everything else stays
-   disciplined around it. All three are open, Google-Fonts-hosted (same
-   network-dependency trade-off as before -- degrades to system fonts
-   silently if blocked, no broken layout). */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@500;600&display=swap');
+/* Hanken Grotesk (headlines) + Inter (body) + Geist (small/mono-ish
+   labels and data) + Material Symbols Outlined (icons) -- matching the
+   Stitch reference's own Google Fonts import exactly (see module
+   docstring for why code.html, not DESIGN.md's prose, is ground truth
+   here). Degrades to system fonts silently if the network is blocked, no
+   broken layout. */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Material+Symbols+Outlined:opsz,wght,FILL@20..48,100..700,0..1&display=swap');
 
 :root {{
-    --vdx-teal: {_TEAL};
-    --vdx-copper: {_COPPER};
-    --vdx-info: {_INFO};
+    --vdx-primary: {_PRIMARY};
+    --vdx-primary-container: {_PRIMARY_CONTAINER};
+    --vdx-secondary: {_SECONDARY};
+    --vdx-tertiary: {_TERTIARY};
+    --vdx-error: {_ERROR};
     --vdx-text: {_TEXT};
     --vdx-muted: {_MUTED};
-    --vdx-rule: {_BORDER};
+    --vdx-rule: {_OUTLINE};
     --vdx-background: {_BACKGROUND};
     --vdx-glass: {_GLASS};
     --vdx-glass-border: {_GLASS_BORDER};
     --vdx-track: {_TRACK};
     --vdx-font-sans: 'Inter', -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-    --vdx-font-serif: 'Fraunces', Georgia, "Times New Roman", serif;
-    --vdx-font-mono: 'JetBrains Mono', ui-monospace, "SF Mono", Consolas, monospace;
+    --vdx-font-display: 'Hanken Grotesk', 'Inter', -apple-system, "Segoe UI", sans-serif;
+    --vdx-font-mono: 'Geist', 'Inter', ui-monospace, "SF Mono", Consolas, monospace;
+}}
+
+/* Material Symbols Outlined -- variable font, filled via the "FILL" axis
+   rather than swapping to a separate "filled" font file. Un-set icons
+   would otherwise render as literal ligature text (e.g. the word
+   "settings") for a moment before the font loads; sizing/alignment is
+   handled per-usage via inline style where needed. */
+.material-symbols-outlined {{
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    vertical-align: middle;
+    line-height: 1;
 }}
 
 /* Ambient cursor-following glow -- the one deliberate exception to an
@@ -76,15 +108,7 @@ _CSS = f"""
    viewport (not scrolled content), matching the mouse coordinates' own
    viewport-relative frame. The `50% 40%` fallback (before the first
    mousemove fires, or with JS disabled) keeps it looking intentional, not
-   broken, in that split second.
-
-   Sized/opacity-tuned after checking real screenshots: a first pass (peak
-   alpha 0.85, radius 1100px) measured as only a ~3-4% brightness delta
-   between opposite cursor corners -- technically hue-neutral but too subtle
-   to read as deliberate rather than a screenshot artifact. Wider radius +
-   higher peak alpha (still fading to fully transparent, still pure white,
-   so it can't become "a visible color gradient") makes the moving light
-   actually legible without introducing any hue. */
+   broken, in that split second. */
 .stApp {{
     background-color: var(--vdx-background);
     background-image: radial-gradient(
@@ -107,9 +131,9 @@ html, body, [class*="css"] {{
    injection order. Deliberate, targeted override of a third-party
    framework's own opinionated default, not a general !important habit. */
 h1, h2, h3 {{
-    font-family: var(--vdx-font-serif) !important;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-family: var(--vdx-font-display) !important;
+    font-weight: 700;
+    letter-spacing: -0.02em;
     color: var(--vdx-text);
 }}
 
@@ -132,19 +156,22 @@ hr {{
 /* --- Shared glass surface -----------------------------------------------
    One consistent "material" applied to every card-like element below
    (metric tiles, ring cards, stat tiles, expanders): translucent white +
-   blur + a saturation boost (the trick that keeps Apple-style frosted
-   materials from reading as merely faded) + a soft top/left highlight
-   edge suggesting glass catching light, plus a diffuse shadow for lift. */
+   blur, a soft black hairline ("luminous edge", the reference's own
+   `border-luminous` token) instead of the previous white border, and a
+   large, very soft ambient shadow -- the reference's "Light Diffusion"
+   elevation model (DESIGN.md: "a very large, very soft shadow... provides
+   a subtle lift without appearing heavy"), replacing the old tighter,
+   darker shadow. */
 div[data-testid="stMetric"],
 .vdx-ring-card,
 .vdx-stat-tile,
 div[data-testid="stExpander"] {{
     background: var(--vdx-glass);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--vdx-glass-border);
-    border-radius: 14px;
-    box-shadow: 0 4px 24px rgba(20, 23, 30, 0.06);
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
 }}
 
 div[data-testid="stMetric"] {{
@@ -165,20 +192,24 @@ div[data-testid="stMetricLabel"] {{
     letter-spacing: 0.045em;
 }}
 
-/* Buttons/links: teal is the single primary accent now (replacing the old
-   flat blue) -- restrained motion on hover only, never on load/idle. */
+/* Buttons/links: indigo is the single primary accent now -- restrained
+   motion on hover only, never on load/idle. A soft indigo-tinted glow
+   shadow (the reference's `shadow-primary/20`) instead of a flat drop
+   shadow reads as "the glass itself is lit from within", not just lifted. */
 .stButton > button, .stDownloadButton > button {{
-    background-color: var(--vdx-teal);
+    background-color: var(--vdx-primary);
     color: white;
     border: none;
-    border-radius: 10px;
-    padding: 0.45rem 1.15rem;
-    font-weight: 500;
-    transition: opacity 0.15s ease;
+    border-radius: 12px;
+    padding: 0.5rem 1.25rem;
+    font-weight: 600;
+    box-shadow: 0 8px 20px rgba(53, 37, 205, 0.2);
+    transition: opacity 0.15s ease, transform 0.15s ease;
 }}
 .stButton > button:hover, .stDownloadButton > button:hover {{
-    opacity: 0.85;
+    opacity: 0.9;
     color: white;
+    transform: translateY(-1px);
 }}
 
 div[data-testid="stExpander"] {{
@@ -203,23 +234,24 @@ div[data-testid="stExpander"] {{
    The one thing the old page-length "Report Preview" walk had that
    wasn't already shown elsewhere on the dashboard (see app/main.py's
    module docstring) -- given the same glass material as every other
-   surface here, plus a teal left rule (this app's single primary accent)
-   to read as "the conclusion", not just another paragraph of body text. */
+   surface here, plus an indigo left rule (this app's single primary
+   accent) to read as "the conclusion", not just another paragraph of
+   body text. */
 .vdx-recommendation-card {{
     background: var(--vdx-glass);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--vdx-glass-border);
-    border-left: 3px solid var(--vdx-teal);
-    border-radius: 14px;
+    border-left: 3px solid var(--vdx-primary);
+    border-radius: 16px;
     padding: 1rem 1.35rem;
-    box-shadow: 0 4px 24px rgba(20, 23, 30, 0.06);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
     margin: 0.25rem 0 1.25rem;
 }}
 
 .vdx-recommendation-title {{
-    font-family: var(--vdx-font-serif);
-    font-weight: 600;
+    font-family: var(--vdx-font-display);
+    font-weight: 700;
     font-size: 1.05rem;
     color: var(--vdx-text);
     margin-bottom: 0.45rem;
@@ -248,10 +280,8 @@ div[data-testid="stExpander"] {{
 /* --- Micro-visualization: instrument-bezel ring gauge --------------------
    One reusable component (see app/components.py's render_ring()),
    parameterized entirely through inline CSS custom properties (--pct
-   0-100, --ring-color). Heavier than the old thin conic-gradient ring --
-   a thicker arc + an inset shadow on the inner disc suggests a lens/
-   eyepiece bezel rather than a flat progress ring, the one deliberate
-   "instrument" signature this redesign leans on. */
+   0-100, --ring-color). A thicker arc + an inset shadow on the inner disc
+   suggests a lens/eyepiece bezel rather than a flat progress ring. */
 .vdx-ring-card {{
     padding: 0.75rem;
     display: flex;
@@ -294,11 +324,9 @@ div[data-testid="stExpander"] {{
 
 /* --- Badge pills ----------------------------------------------------------
    Semantic variant names (see app/components.py's render_pill()): "normal"
-   (teal -- no finding / calm), "attention" (copper -- a finding is
-   present), "info" (neutral slate -- informational, not a status verdict).
-   Renamed from the old color-named "emerald"/"amber"/"blue" since those
-   names no longer describe the actual colors once re-hued -- a latent
-   mismatch-bug class this avoids outright. */
+   (indigo -- no finding / calm), "attention" (tertiary orange -- a finding
+   is present), "info" (secondary sky-blue -- informational, not a status
+   verdict). */
 .vdx-pill {{
     display: inline-flex;
     align-items: center;
@@ -309,9 +337,9 @@ div[data-testid="stExpander"] {{
     font-weight: 600;
     font-family: var(--vdx-font-sans);
 }}
-.vdx-pill-normal {{ background: rgba(14, 124, 134, 0.12); color: var(--vdx-teal); }}
-.vdx-pill-attention {{ background: rgba(179, 97, 26, 0.12); color: var(--vdx-copper); }}
-.vdx-pill-info {{ background: rgba(91, 107, 122, 0.12); color: var(--vdx-info); }}
+.vdx-pill-normal {{ background: rgba(53, 37, 205, 0.1); color: var(--vdx-primary); }}
+.vdx-pill-attention {{ background: rgba(164, 65, 0, 0.1); color: var(--vdx-tertiary); }}
+.vdx-pill-info {{ background: rgba(14, 165, 233, 0.12); color: var(--vdx-secondary); }}
 
 /* --- Compact stat tile -----------------------------------------------------
    One dense glass unit combining a label + pill + ring gauge (see
@@ -335,8 +363,8 @@ div[data-testid="stExpander"] {{
 }}
 
 .vdx-stat-tile-title {{
-    font-family: var(--vdx-font-serif);
-    font-weight: 600;
+    font-family: var(--vdx-font-display);
+    font-weight: 700;
     font-size: 0.98rem;
     color: var(--vdx-text);
     line-height: 1.25;
@@ -383,9 +411,9 @@ div[data-testid="stExpander"] {{
    clipped to a fixed rounded frame, and keeps the caption (a sibling under
    the image, not inside the scaled element) from zooming along with it. */
 div[data-testid="stImage"] {{
-    border-radius: 12px;
+    border-radius: 14px;
     overflow: hidden;
-    border: 1px solid var(--vdx-rule);
+    border: 1px solid var(--vdx-glass-border);
 }}
 div[data-testid="stImage"] img {{
     display: block;
@@ -412,6 +440,184 @@ div[data-testid="stButtonGroup"] button {{
     font-size: 0.8rem;
 }}
 
+/* --- Fixed header bar -----------------------------------------------------
+   New in this pass -- the reference mockup wraps the whole app in a fixed
+   top nav (logo + settings + export affordance) and a fixed bottom bar,
+   both frosted glass "surface-glass" panels. Streamlit already renders its
+   own [data-testid="stHeader"] toolbar at the very top; this bar is
+   rendered as ordinary content (via st.markdown) positioned fixed just
+   below it rather than replacing Streamlit's own header, so the toolbar's
+   own menu/deploy controls stay reachable. */
+.vdx-header-spacer {{
+    height: 3.25rem;
+}}
+
+.vdx-header {{
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 999998;
+    height: 3.25rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 1.5rem;
+    background: rgba(255, 255, 255, 0.85);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-bottom: 1px solid var(--vdx-glass-border);
+}}
+
+.vdx-header-logo {{
+    font-family: var(--vdx-font-display);
+    font-weight: 700;
+    font-size: 1.25rem;
+    color: var(--vdx-primary);
+    letter-spacing: -0.01em;
+}}
+
+.vdx-header-status {{
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--vdx-font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--vdx-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}}
+
+.vdx-status-dot {{
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10B981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+}}
+
+/* --- Intake panel -----------------------------------------------------
+   The centered "Patient Intake & Signal Acquisition" glass panel shown
+   before an image is available (see app/main.py's render_intake_screen())
+   -- this IS the reference mockup's one concrete screen, reproduced
+   directly rather than reinterpreted. `st.container(key=...)` produces a
+   stable "st-key-<key>" class (confirmed live, same mechanism the result
+   sections above already rely on for their fade-in animation), which is
+   what these two selectors target -- NOT a custom class of the same name,
+   since raw HTML classes can't wrap real Streamlit widgets (the toggle
+   inside vdx-intake-toggle-row is a real st.toggle, not decoration). */
+[class*="st-key-vdx-intake-panel"] {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(32px);
+    -webkit-backdrop-filter: blur(32px);
+    border: 1px solid var(--vdx-glass-border);
+    border-radius: 24px;
+    padding: 2.5rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.06);
+    max-width: 960px;
+    margin: 3vh auto 0;
+}}
+
+.vdx-intake-eyebrow {{
+    font-family: var(--vdx-font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--vdx-primary);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+}}
+
+.vdx-intake-description {{
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: var(--vdx-muted);
+    max-width: 32rem;
+}}
+
+[class*="st-key-vdx-intake-toggle-row"] {{
+    padding: 0.9rem 1rem;
+    background: rgba(255, 255, 255, 0.4);
+    border: 1px solid var(--vdx-glass-border);
+    border-radius: 14px;
+}}
+
+.vdx-intake-toggle-label {{
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--vdx-text);
+}}
+
+.vdx-intake-toggle-sublabel {{
+    font-size: 0.68rem;
+    color: var(--vdx-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 500;
+}}
+
+/* Streamlit's native toggle already IS a real, working control -- this
+   just recolors its track/thumb to the indigo accent instead of
+   restyling/replacing the widget (which would risk losing its
+   click/keyboard behavior). */
+div[data-testid="stCheckbox"] label div[data-testid="stWidgetLabel"] {{
+    display: none;
+}}
+button[aria-checked="true"][role="switch"] {{
+    background-color: var(--vdx-primary) !important;
+}}
+
+/* Streamlit's file_uploader restyled as the reference's dashed dropzone --
+   real drag-and-drop/click-to-browse behavior preserved (this only
+   changes CSS, not the widget), just re-skinned so it reads as "Drop
+   clinical images here" rather than Streamlit's default uploader chrome. */
+[data-testid="stFileUploaderDropzone"] {{
+    background: rgba(53, 37, 205, 0.03) !important;
+    border: 2px dashed var(--vdx-rule) !important;
+    border-radius: 16px !important;
+    padding: 2rem !important;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}}
+[data-testid="stFileUploaderDropzone"]:hover {{
+    background: rgba(53, 37, 205, 0.06) !important;
+    border-color: var(--vdx-primary) !important;
+}}
+[data-testid="stFileUploaderDropzoneInstructions"] svg {{
+    display: none;
+}}
+[data-testid="stBaseButton-secondary"] {{
+    border-radius: 999px !important;
+    border-color: rgba(53, 37, 205, 0.25) !important;
+    color: var(--vdx-primary) !important;
+}}
+
+/* Patient ID input: a floating small uppercase label above the field
+   (matching the reference) instead of Streamlit's default label-above
+   spacing -- label_visibility="collapsed" is used in main.py and this
+   supplies the visual label instead via a preceding markdown span, so the
+   real <label> (kept for accessibility) can stay visually hidden without
+   an awkward gap where it used to be. */
+.vdx-field-label {{
+    font-family: var(--vdx-font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--vdx-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    margin-bottom: 0.35rem;
+    display: block;
+}}
+div[data-testid="stTextInput"] input {{
+    background: rgba(255, 255, 255, 0.4) !important;
+    border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    border-radius: 14px !important;
+    height: 3rem;
+}}
+div[data-testid="stTextInput"] input:focus {{
+    border-color: var(--vdx-primary) !important;
+    box-shadow: 0 0 0 3px rgba(53, 37, 205, 0.15) !important;
+}}
+
 /* --- v2: loading/progress experience ---------------------------------
    Fixes the "did the site crash?" problem an opaque, unpinned spinner
    had: this banner stays visible regardless of scroll position.
@@ -432,8 +638,8 @@ div[data-testid="stButtonGroup"] button {{
    Centering it as a fixed-width floating card via `left: 50%; transform:
    translateX(-50%)` avoids the bug entirely.
 
-   `top: 76px` clears Streamlit's own header toolbar (measured live:
-   [data-testid="stHeader"], 60px tall) plus a small gap. A spacer
+   `top: 132px` clears Streamlit's own header toolbar PLUS this theme's own
+   fixed .vdx-header bar (60px + 52px + a small gap). A spacer
    (.vdx-progress-banner-spacer, rendered in normal flow right before this)
    reserves room so real content isn't heavily covered when the banner
    first appears. */
@@ -443,19 +649,19 @@ div[data-testid="stButtonGroup"] button {{
 
 .vdx-progress-banner {{
     position: fixed;
-    top: 76px;
+    top: 132px;
     left: 50%;
     transform: translateX(-50%);
     width: min(880px, calc(100vw - 3rem));
     box-sizing: border-box;
     z-index: 999;
     background: var(--vdx-glass);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--vdx-glass-border);
-    border-radius: 14px;
+    border-radius: 16px;
     padding: 0.9rem 1.25rem;
-    box-shadow: 0 8px 28px rgba(20, 23, 30, 0.12);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
 }}
 
 .vdx-progress-label {{
@@ -476,7 +682,7 @@ div[data-testid="stButtonGroup"] button {{
 .vdx-progress-fill {{
     height: 100%;
     border-radius: 2px;
-    background-color: var(--vdx-teal);
+    background-color: var(--vdx-primary);
     transition: width 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }}
 
@@ -551,9 +757,9 @@ div[data-testid="stButtonGroup"] button {{
 }}
 
 .vdx-error-card {{
-    background-color: rgba(179, 97, 26, 0.08);
-    border: 1px solid rgba(179, 97, 26, 0.25);
-    border-radius: 12px;
+    background-color: rgba(186, 26, 26, 0.06);
+    border: 1px solid rgba(186, 26, 26, 0.25);
+    border-radius: 14px;
     padding: 1rem 1.25rem;
     margin-bottom: 1rem;
 }}
@@ -597,8 +803,8 @@ div[data-testid="stButtonGroup"] button {{
     box-sizing: border-box;
     z-index: 900;
     background: rgba(255, 255, 255, 0.94);
-    backdrop-filter: blur(20px) saturate(160%);
-    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
     border: 1px solid var(--vdx-glass-border);
     border-radius: 12px;
     padding: 0.5rem 1rem;
@@ -620,6 +826,8 @@ div[data-testid="stButtonGroup"] button {{
     [data-testid="stFileUploaderDropzone"],
     .stButton,
     .stDownloadButton,
+    .vdx-header,
+    .vdx-header-spacer,
     .vdx-progress-banner,
     .vdx-progress-banner-spacer,
     .vdx-skeleton,
@@ -704,3 +912,23 @@ def inject_ambient_cursor() -> None:
     value used.
     """
     _AMBIENT_CURSOR()
+
+
+def render_header() -> None:
+    """Fixed top header bar -- new in this pass, matching the reference
+    mockup's nav (logo left, status/settings right). Rendered as ordinary
+    content positioned fixed just below Streamlit's own header toolbar
+    (see .vdx-header's CSS comment), so Streamlit's own menu/deploy
+    controls stay reachable rather than being covered over.
+    """
+    st.markdown(
+        """<div class="vdx-header-spacer"></div>
+<div class="vdx-header">
+    <span class="vdx-header-logo">VisionDx</span>
+    <div class="vdx-header-status">
+        <span class="vdx-status-dot"></span>
+        <span>Engine online</span>
+    </div>
+</div>""",
+        unsafe_allow_html=True,
+    )

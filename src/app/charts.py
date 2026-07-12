@@ -4,9 +4,10 @@ Severity is ORDINAL (swapping the class order would change its meaning),
 not nominal categorical identity -- per the dataviz skill's color-formula.md
 this takes a single one-hue ramp with monotone lightness, not the
 categorical eight-hue palette. The ramp below is this app's own primary
-accent teal (--vdx-teal, #0E7C86 -- see theme.py's module docstring for why
-teal replaced the old flat blue in the glass redesign) stepped light->dark,
-same single-hue/monotone-lightness shape as the ramp it replaces.
+accent indigo (--vdx-primary, #3525CD -- see theme.py's module docstring
+for the "Clinical Liquid Glass" reference this re-hue matches) stepped
+light->dark, same single-hue/monotone-lightness shape as the ramp it
+replaces.
 
 A single "series" (the probability distribution) needs no legend box per
 the same reference -- identity here comes from the y-axis category labels,
@@ -20,11 +21,11 @@ import plotly.graph_objects as go
 
 from src.detection.model import SEVERITY_LABELS
 
-_ORDINAL_RAMP = ["#8FD0D6", "#5CB8C0", "#2C9CA6", "#0E7C86", "#0A5960"]
+_ORDINAL_RAMP = ["#C3C0FF", "#8F86F5", "#6355E8", "#3525CD", "#241A8F"]
 
-_PRIMARY_INK = "#1A1D23"
-_MUTED_INK = "#5F6570"
-_GRIDLINE = "#DCE0E7"
+_PRIMARY_INK = "#191C1E"
+_MUTED_INK = "#464555"
+_GRIDLINE = "#C7C4D8"
 
 # A genuine 0.0% bar renders with literally no visible mark -- confirmed
 # live, a true zero was indistinguishable at a glance from a missing/broken
@@ -94,11 +95,12 @@ def probability_bar_chart(detection: dict) -> go.Figure:
 # Binary classifiers (glaucoma, AMD) are NOMINAL-with-semantic-meaning, not
 # ordinal like DR severity above -- "present" isn't a step further along a
 # scale from "absent", it's the other one of two states. So this uses the
-# app's own two semantic colors directly (teal = normal/absent, copper =
-# attention/present, same mapping as render_pill()'s "normal"/"attention"
-# variants in components.py) rather than a single-hue ordinal ramp.
-_TEAL = "#0E7C86"
-_COPPER = "#B3611A"
+# app's own two semantic colors directly (indigo = normal/absent, tertiary
+# orange = attention/present, same mapping as render_pill()'s "normal"/
+# "attention" variants in components.py) rather than a single-hue ordinal
+# ramp.
+_PRIMARY = "#3525CD"
+_TERTIARY = "#A44100"
 
 
 def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
@@ -113,7 +115,7 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
     true_values = [p * 100 for p in detection["probabilities"]]
     display_values = [max(v, _MIN_VISIBLE_BAR) for v in true_values]
     predicted_idx = detection["class_idx"]
-    bar_colors = [_TEAL, _COPPER]
+    bar_colors = [_PRIMARY, _TERTIARY]
 
     text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(true_values)]
     text_colors = [_PRIMARY_INK if i == predicted_idx else _MUTED_INK for i in range(2)]

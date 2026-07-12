@@ -15,18 +15,19 @@ import streamlit as st
 
 from src.report.content import DISCLAIMER
 
-# Matches theme.py's --vdx-teal -- kept as its own local copy rather than a
-# cross-module import, matching how this codebase already keeps each
+# Matches theme.py's --vdx-primary -- kept as its own local copy rather than
+# a cross-module import, matching how this codebase already keeps each
 # module's small brand-color constants local (see report/pdf.py,
 # app/charts.py).
-_DEFAULT_RING_COLOR = "#0E7C86"
+_DEFAULT_RING_COLOR = "#3525CD"
 
 # Semantic, not color-named (see theme.py's module docstring): "normal" (no
-# finding / calm, teal), "attention" (a finding is present, copper), "info"
-# (neutral/informational, not a status verdict, muted slate). Renamed from
-# the old "emerald"/"amber"/"blue" when the underlying colors were re-hued
-# for the glass redesign -- a color-named CSS class mapping to a different
-# color than its name implies is a latent bug waiting to happen.
+# finding / calm, indigo), "attention" (a finding is present, tertiary
+# orange), "info" (neutral/informational, not a status verdict, sky blue).
+# Renamed from the old "emerald"/"amber"/"blue" when the underlying colors
+# were first re-hued for the glass redesign -- a color-named CSS class
+# mapping to a different color than its name implies is a latent bug
+# waiting to happen.
 _PILL_VARIANTS = {"normal", "attention", "info"}
 
 

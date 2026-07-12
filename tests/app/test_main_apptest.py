@@ -42,16 +42,32 @@ def _fresh_theme_module():
     yield
 
 
-def test_app_shows_upload_prompt_with_no_image_selected():
+def test_app_shows_intake_screen_with_no_image_selected():
+    # Third redesign pass ("Clinical Liquid Glass", see main.py's module
+    # docstring): before an image is available, the app shows a centered
+    # intake panel (render_intake_screen()) instead of the old plain
+    # st.info() prompt -- assert its headline and gated "Initialize
+    # analysis" button render instead of the retired message.
     at = AppTest.from_file(_APP_PATH).run(timeout=_RUN_TIMEOUT)
 
     assert not at.exception
-    assert any("Upload a fundus photo" in info.value for info in at.info)
+    markdown_text = " ".join(m.value for m in at.markdown)
+    assert "Patient intake" in markdown_text
+    initialize_buttons = [b for b in at.button if b.key == "initialize_btn"]
+    assert len(initialize_buttons) == 1
+    assert initialize_buttons[0].disabled  # no image chosen yet
 
 
 def test_demo_mode_runs_full_pipeline_without_exceptions():
     at = AppTest.from_file(_APP_PATH).run(timeout=_RUN_TIMEOUT)
-    at.sidebar.toggle(key="demo_mode").set_value(True)
+    # Demo mode / patient ID / the image source all live in the intake
+    # panel (main area) on first launch now, not the sidebar -- see
+    # render_intake_screen(). Toggling demo mode makes a sample image
+    # available, which un-disables "Initialize analysis"; clicking it sets
+    # the "_vdx_started" session-state flag the rest of the app gates on.
+    at.toggle(key="demo_mode").set_value(True)
+    at = at.run(timeout=_RUN_TIMEOUT)
+    at.button(key="initialize_btn").click()
     at = at.run(timeout=_RUN_TIMEOUT)
 
     assert not at.exception
