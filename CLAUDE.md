@@ -27,7 +27,7 @@ checkpoints can still run inference. Tagged `v1.0.0`.
 - Streamlit for the app UI, Plotly for charts.
 - ReportLab for PDF report generation.
 - Report generation and the dashboard share one pipeline orchestrator (`src/report/pipeline.run_pipeline()`) and one renderer-agnostic content model (`src/report/content.py`), so the PDF (`src/report/pdf.py`) and the in-app "preview before export" (`src/app/render_preview.py`) can't drift apart in content, only in presentation. `src/app/main.py` is the Streamlit entrypoint; run it with `.venv\Scripts\python.exe -m streamlit run src/app/main.py`.
-- Training happens locally on a local NVIDIA GPU via `src/detection/train.py` / `src/segmentation/vessel_train.py` (CUDA-enabled torch — see `requirements.txt` for the install command). Inference and the app run locally on CPU.
+- Training happens locally on a local NVIDIA GPU via `src/detection/train.py` / `src/segmentation/vessel_train.py` (CUDA-enabled torch — see `requirements.txt` for the install command). Inference, the app, and deployment all run on CPU — `requirements.txt` itself is pinned to the CPU build of torch/torchvision since Streamlit Community Cloud has no GPU; see "Git workflow" below before merging any `requirements.txt` change to `master`.
 
 ## Repo layout
 
@@ -55,6 +55,7 @@ tests/                unit tests, mirrors src/ structure
 - `master` is the stable branch: what Streamlit Community Cloud deploys from and what recruiters/portfolio viewers see live. It should always work.
 - `dev` is the active-work branch — commit and experiment there. Merge (or PR) into `master` only once a change is tested and polished.
 - Exception: a live-production incident (e.g. the deployed app crashing) gets fixed directly on `master`, since that's the only branch Streamlit Cloud actually redeploys — fixes pushed to `dev` alone won't get tested against the real crash. Sync `dev` back up (fast-forward is usually enough) once `master` is stable again.
+- **`requirements.txt` must keep `torch`/`torchvision` pinned to the `+cpu` build** (`--extra-index-url https://download.pytorch.org/whl/cpu`, `torch==2.11.0+cpu`, `torchvision==0.26.0+cpu`). Streamlit Community Cloud has no GPU — a bare `torch==2.11.0` resolves to the CUDA-bundled default PyPI wheel, and CUDA runtime init/device probing with no driver present segfaults the deployed app on the very first analysis run (this actually happened — see the `+cpu` pin's own comment in `requirements.txt` for the full incident and the exact commands). Local GPU training reverses the usual order because of this pin: run `pip install -r requirements.txt` first (installs the CPU build), *then* install the CUDA build over it for training — re-running `pip install -r requirements.txt` afterward reverts back to CPU, so do that last. **Before merging `dev` → `master`, if `requirements.txt` was touched, double-check the `+cpu` pin is still intact** — installing the CUDA build for local training and then committing without reverting would silently push it back to `master` and reintroduce the deploy crash.
 
 ## Working with Claude Code on this repo
 
