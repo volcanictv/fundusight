@@ -16,13 +16,14 @@ openpyxl==3.1.5  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
 monai==1.6.0
 
 # Classical CV
-# opencv-python-headless, not opencv-python: this app never calls cv2's GUI
-# functions (imshow/waitKey/namedWindow), and the full opencv-python build's
-# GUI bindings need libGL.so.1, which isn't present on minimal Linux
-# deployment containers (e.g. Streamlit Community Cloud) and breaks import
-# entirely. Headless has the identical image-processing API, just without
-# the GUI backend, so nothing here changes.
-opencv-python-headless==5.0.0.93
+# Plain opencv-python, not headless: grad-cam (below) hard-requires
+# opencv-python by name in its own package metadata, so pinning
+# opencv-python-headless here doesn't remove it from the install -- pip
+# installs both, and they collide over the same cv2/ package directory.
+# The GUI build's libGL.so.1 dependency (missing on minimal deployment
+# containers, e.g. Streamlit Community Cloud) is supplied instead via
+# packages.txt at the repo root -- see that file's comment.
+opencv-python==5.0.0.93
 scikit-image==0.26.0
 
 # Explainability
