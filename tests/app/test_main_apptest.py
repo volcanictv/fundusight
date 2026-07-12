@@ -52,7 +52,7 @@ def test_app_shows_intake_screen_with_no_image_selected():
 
     assert not at.exception
     markdown_text = " ".join(m.value for m in at.markdown)
-    assert "Patient intake" in markdown_text
+    assert "Patient Intake" in markdown_text
     initialize_buttons = [b for b in at.button if b.key == "initialize_btn"]
     assert len(initialize_buttons) == 1
     assert initialize_buttons[0].disabled  # no image chosen yet

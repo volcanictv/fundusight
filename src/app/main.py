@@ -424,10 +424,34 @@ def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
             image = load_demo_image(selected["path"])
             if not effective_patient_id:
                 effective_patient_id = f"DEMO-{selected['id_code']}"
+    elif container is st:
+        # The intake panel composes its own icon + heading + caption INSIDE
+        # the same dashed box as the uploader (see .st-key-vdx-dropzone-
+        # wrapper in theme.py, which strips the native dropzone's own
+        # border/background so this wrapper reads as the one dashed box,
+        # matching the reference mockup's single-composition dropzone
+        # instead of a custom heading sitting above a separately-bordered
+        # native widget). Streamlit's own instructional text is hidden by
+        # that same CSS since it would otherwise repeat this heading.
+        with st.container(key="vdx-dropzone-wrapper"):
+            st.markdown(
+                '<div style="text-align: center;">'
+                '<span class="material-symbols-outlined" style="font-size: 2.25rem; color: var(--vdx-primary);">cloud_upload</span>'
+                '<p style="font-family: var(--vdx-font-display); font-weight: 700; '
+                'font-size: 1.05rem; margin: 0.5rem 0 0.15rem;">Drop a fundus photo here</p>'
+                '<p class="vdx-caption" style="margin-bottom: 0.75rem;">PNG, JPG, or JPEG</p>'
+                "</div>",
+                unsafe_allow_html=True,
+            )
+            uploaded = container.file_uploader(
+                "Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader", label_visibility="collapsed"
+            )
+        if uploaded is not None:
+            image = _decode_upload(uploaded)
     else:
-        uploaded = container.file_uploader(
-            "Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader"
-        )
+        # Compact sidebar path: no custom heading, so the native label
+        # stays as the only one.
+        uploaded = container.file_uploader("Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader")
         if uploaded is not None:
             image = _decode_upload(uploaded)
 
@@ -452,7 +476,7 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
         with left_col:
             st.markdown(
                 '<span class="vdx-intake-eyebrow">System entry portal</span>'
-                '<h2 style="margin-top: 0.4rem;">Patient intake &amp; signal acquisition</h2>'
+                '<h2 style="margin-top: 0.4rem;">Patient Intake &amp; Signal Acquisition</h2>'
                 '<p class="vdx-intake-description">Upload a fundus photo or enter patient '
                 "details to run the automated screening pipeline (quality check, disease "
                 "detection, biomarkers, and a recommendation summary).</p>",
@@ -485,13 +509,6 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
                 key="patient_id",
                 label_visibility="collapsed",
             )
-            if not st.session_state.get("demo_mode"):
-                st.markdown(
-                    '<p style="font-family: var(--vdx-font-display); font-weight: 700; '
-                    'font-size: 1.05rem; margin: 0.75rem 0 0.15rem;">Drop a fundus photo here</p>'
-                    '<p class="vdx-caption" style="margin-bottom: 0.5rem;">PNG, JPG, or JPEG</p>',
-                    unsafe_allow_html=True,
-                )
             effective_patient_id, image = _resolve_image_source(container=st)
 
             st.markdown('<div style="height: 0.75rem"></div>', unsafe_allow_html=True)
@@ -505,15 +522,18 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
             )
 
         st.divider()
-        status_col, _ = st.columns([1, 1])
-        with status_col:
-            st.markdown(
-                '<div class="vdx-header-status">'
-                '<span class="vdx-status-dot"></span>'
-                "<span>Core engine ready</span>"
-                "</div>",
-                unsafe_allow_html=True,
-            )
+        # The reference mockup pairs this with a right-aligned "Lat: 40ms /
+        # v4.2.1-stable" readout -- fabricated telemetry with no real
+        # backing value here, so it's dropped rather than faked; this
+        # status dot is left as the one genuinely meaningful signal (the
+        # page loaded and its components registered).
+        st.markdown(
+            '<div class="vdx-header-status">'
+            '<span class="vdx-status-dot"></span>'
+            "<span>Core engine ready</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     return effective_patient_id, image, initialize_clicked
 

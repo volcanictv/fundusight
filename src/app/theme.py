@@ -62,12 +62,27 @@ _TRACK = "rgba(0, 0, 0, 0.06)"
 _CSS = f"""
 <style>
 /* Hanken Grotesk (headlines) + Inter (body) + Geist (small/mono-ish
-   labels and data) + Material Symbols Outlined (icons) -- matching the
-   Stitch reference's own Google Fonts import exactly (see module
-   docstring for why code.html, not DESIGN.md's prose, is ground truth
-   here). Degrades to system fonts silently if the network is blocked, no
-   broken layout. */
-@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&family=Material+Symbols+Outlined:opsz,wght,FILL@20..48,100..700,0..1&display=swap');
+   labels and data) -- matching the Stitch reference's own Google Fonts
+   import exactly (see module docstring for why code.html, not DESIGN.md's
+   prose, is ground truth here). Degrades to system fonts silently if the
+   network is blocked, no broken layout. */
+@import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&display=swap');
+
+/* Material Symbols Outlined, in its own @import: this variable font
+   registers FOUR axes (opsz, wght, FILL, GRAD) -- an earlier version of
+   this rule only requested three (opsz, wght, FILL), which silently
+   failed to apply at all, leaving every hand-inserted
+   `material-symbols-outlined` span (e.g. the intake dropzone's upload
+   icon) rendering as literal fallback text ("cloud_upload") instead of a
+   glyph -- confirmed live via screenshot. Also `display=block` here
+   specifically, not `swap` like the text fonts above: this is a
+   ligature-based icon font, so "swap" briefly (or, if the request ever
+   fails, permanently) shows the raw icon NAME as text; "block" hides the
+   fallback text instead of showing it. Streamlit's own `icon=":material/
+   ...":` shorthand (used on st.button below) bundles its own copy of this
+   font and was unaffected by this bug -- only the manually-inserted spans
+   were. */
+@import url('https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block');
 
 :root {{
     --vdx-primary: {_PRIMARY};
@@ -497,6 +512,42 @@ div[data-testid="stButtonGroup"] button {{
     box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
 }}
 
+/* --- Sidebar ---------------------------------------------------------
+   A design-review pass caught this: every other surface (the intake
+   panel, result tiles, the recommendation card) got the glass treatment,
+   but the persistent sidebar (explainability method once results exist,
+   or the full compact input set) was left as bare default Streamlit --
+   a flat gray panel with plain black-bordered widgets, no blur, no accent
+   color on focus. Since the sidebar is visible on every screen, that gap
+   undermined the "whole frontend" redesign more than any single
+   component would. Same glass material as the rest of the app, and its
+   own selectbox/text input/toggle re-themed to match what main.py's
+   intake-panel versions of those same widgets already look like. */
+[data-testid="stSidebar"] {{
+    background: var(--vdx-glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border-right: 1px solid var(--vdx-glass-border);
+}}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input,
+[data-testid="stSidebar"] [data-testid="stSelectbox"] div[data-baseweb="select"] > div {{
+    background: rgba(255, 255, 255, 0.6) !important;
+    border: 1px solid rgba(0, 0, 0, 0.1) !important;
+    border-radius: 12px !important;
+}}
+[data-testid="stSidebar"] [data-testid="stTextInput"] input:focus {{
+    border-color: var(--vdx-primary) !important;
+    box-shadow: 0 0 0 3px rgba(53, 37, 205, 0.15) !important;
+}}
+[data-testid="stSidebar"] button[aria-checked="true"][role="switch"] {{
+    background-color: var(--vdx-primary) !important;
+}}
+[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] {{
+    background: rgba(53, 37, 205, 0.03) !important;
+    border: 2px dashed var(--vdx-rule) !important;
+    border-radius: 14px !important;
+}}
+
 /* --- Intake panel -----------------------------------------------------
    The centered "Patient Intake & Signal Acquisition" glass panel shown
    before an image is available (see app/main.py's render_intake_screen())
@@ -570,7 +621,11 @@ button[aria-checked="true"][role="switch"] {{
 /* Streamlit's file_uploader restyled as the reference's dashed dropzone --
    real drag-and-drop/click-to-browse behavior preserved (this only
    changes CSS, not the widget), just re-skinned so it reads as "Drop
-   clinical images here" rather than Streamlit's default uploader chrome. */
+   clinical images here" rather than Streamlit's default uploader chrome.
+   This is the SIDEBAR/default look (own dashed border, own background,
+   Streamlit's own instructional text kept since nothing else labels it
+   there); the intake panel overrides this right below since it wraps the
+   same widget in its own dashed box with a custom heading instead. */
 [data-testid="stFileUploaderDropzone"] {{
     background: rgba(53, 37, 205, 0.03) !important;
     border: 2px dashed var(--vdx-rule) !important;
@@ -589,6 +644,39 @@ button[aria-checked="true"][role="switch"] {{
     border-radius: 999px !important;
     border-color: rgba(53, 37, 205, 0.25) !important;
     color: var(--vdx-primary) !important;
+}}
+
+/* Intake panel's dropzone: ONE dashed box combining a centered icon +
+   heading + caption (rendered by main.py's _resolve_image_source()) with
+   the actual uploader -- a design-review pass found the previous version
+   (custom heading sitting ABOVE a separately-bordered native widget, with
+   Streamlit's own "Drag and drop file here" text still showing inside
+   it) read as an unfinished, doubled-up translation of the reference's
+   single-composition dropzone. Stripping the native widget's own border/
+   background/padding and hiding its own instructional text lets this
+   outer wrapper be the one visible box instead. */
+[class*="st-key-vdx-dropzone-wrapper"] {{
+    background: rgba(53, 37, 205, 0.03);
+    border: 2px dashed var(--vdx-rule);
+    border-radius: 16px;
+    padding: 1.5rem;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}}
+[class*="st-key-vdx-dropzone-wrapper"]:hover {{
+    background: rgba(53, 37, 205, 0.06);
+    border-color: var(--vdx-primary);
+}}
+[class*="st-key-vdx-dropzone-wrapper"] [data-testid="stFileUploaderDropzone"] {{
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+}}
+[class*="st-key-vdx-dropzone-wrapper"] [data-testid="stFileUploaderDropzoneInstructions"] {{
+    display: none;
+}}
+[class*="st-key-vdx-dropzone-wrapper"] [data-testid="stFileUploaderDropzone"] section > button {{
+    margin: 0 auto;
+    display: flex;
 }}
 
 /* Patient ID input: a floating small uppercase label above the field
@@ -916,19 +1004,25 @@ def inject_ambient_cursor() -> None:
 
 def render_header() -> None:
     """Fixed top header bar -- new in this pass, matching the reference
-    mockup's nav (logo left, status/settings right). Rendered as ordinary
-    content positioned fixed just below Streamlit's own header toolbar
-    (see .vdx-header's CSS comment), so Streamlit's own menu/deploy
-    controls stay reachable rather than being covered over.
+    mockup's nav. Rendered as ordinary content positioned fixed just below
+    Streamlit's own header toolbar (see .vdx-header's CSS comment), so
+    Streamlit's own menu/deploy controls stay reachable rather than being
+    covered over.
+
+    Logo only -- no status pill here. A first pass duplicated "Engine
+    online" in the header AND "Core engine ready" at the bottom of the
+    intake panel (app/main.py's render_intake_screen()), two status
+    indicators with different wording for what read as the same
+    underlying state. The reference mockup's own status line lives in the
+    intake card's footer row, not its nav, so that's the one kept; this
+    header also has no gear/export/avatar to visually balance a status
+    pill against (this app has no settings/profile screen those would
+    open), so a bare wordmark reads as deliberate rather than unfinished.
     """
     st.markdown(
         """<div class="vdx-header-spacer"></div>
 <div class="vdx-header">
     <span class="vdx-header-logo">VisionDx</span>
-    <div class="vdx-header-status">
-        <span class="vdx-status-dot"></span>
-        <span>Engine online</span>
-    </div>
 </div>""",
         unsafe_allow_html=True,
     )
