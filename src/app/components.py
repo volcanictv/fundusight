@@ -13,6 +13,8 @@ import html
 
 import streamlit as st
 
+from src.report.content import DISCLAIMER
+
 # Matches theme.py's --vdx-teal -- kept as its own local copy rather than a
 # cross-module import, matching how this codebase already keeps each
 # module's small brand-color constants local (see report/pdf.py,
@@ -117,11 +119,27 @@ def render_recommendation_card(text: str) -> None:
     rest of that story) -- given its own card here rather than a plain
     st.markdown paragraph, since it's the closest thing this page has to
     "the actual conclusion" and deserves to read that way.
+
+    `_build_recommendation()` always appends the shared DISCLAIMER
+    constant as its last sentence -- rendering it as one run-on paragraph
+    left the disclaimer just trailing off the clinical summary with no
+    visual break, undercutting exactly the thing it's meant to stand out
+    as (a distinct legal/educational notice, not one more clause of
+    findings). Splitting it onto its own muted line inside the same card
+    fixes that without changing the underlying text at all.
     """
+    summary = text
+    disclaimer = ""
+    if text.endswith(DISCLAIMER):
+        summary = text[: -len(DISCLAIMER)].rstrip()
+        disclaimer = DISCLAIMER
+
+    disclaimer_html = f'<div class="vdx-recommendation-disclaimer">{html.escape(disclaimer)}</div>' if disclaimer else ""
     st.markdown(
         f"""<div class="vdx-recommendation-card">
     <div class="vdx-recommendation-title">Recommendation</div>
-    <div class="vdx-recommendation-body">{html.escape(text)}</div>
+    <div class="vdx-recommendation-body">{html.escape(summary)}</div>
+    {disclaimer_html}
 </div>""",
         unsafe_allow_html=True,
     )

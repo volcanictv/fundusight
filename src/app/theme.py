@@ -231,6 +231,20 @@ div[data-testid="stExpander"] {{
     color: var(--vdx-text);
 }}
 
+/* A visual break from the clinical summary above it -- see
+   components.py's render_recommendation_card() for why this is split out
+   of the main paragraph: a legal/educational disclaimer trailing off as
+   just the last clause of a run-on paragraph reads as an afterthought,
+   not the distinct notice it's meant to be. */
+.vdx-recommendation-disclaimer {{
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--vdx-muted);
+    border-top: 1px solid var(--vdx-rule);
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+}}
+
 /* --- Micro-visualization: instrument-bezel ring gauge --------------------
    One reusable component (see app/components.py's render_ring()),
    parameterized entirely through inline CSS custom properties (--pct
@@ -560,9 +574,18 @@ div[data-testid="stButtonGroup"] button {{
    Small floating footer, same fixed+centered+bounded-width pattern as
    .vdx-progress-banner above. Bottom-anchored deliberately so it never
    shares vertical territory with Streamlit's own header or the progress
-   banner during active loading. */
+   banner during active loading.
+
+   Spacer grown from 2.5rem -> 4.5rem and the footer's own background
+   pushed to near-opaque (0.72 -> 0.94 alpha) after a design-review pass
+   found real content (a detection tile's Grad-CAM cross-reference
+   caption) sitting only ~15px above this footer at the bottom of the
+   page -- on a shorter browser viewport that's a real overlap risk, not
+   just a tight-but-fine gap. Both changes independently reduce that risk:
+   more reserved space below the last real content, and a background
+   solid enough to fully mask anything that still ends up underneath it. */
 .vdx-footer-spacer {{
-    height: 2.5rem;
+    height: 4.5rem;
 }}
 
 .vdx-disclaimer-footer {{
@@ -573,7 +596,7 @@ div[data-testid="stButtonGroup"] button {{
     width: min(680px, calc(100vw - 3rem));
     box-sizing: border-box;
     z-index: 900;
-    background: var(--vdx-glass);
+    background: rgba(255, 255, 255, 0.94);
     backdrop-filter: blur(20px) saturate(160%);
     -webkit-backdrop-filter: blur(20px) saturate(160%);
     border: 1px solid var(--vdx-glass-border);

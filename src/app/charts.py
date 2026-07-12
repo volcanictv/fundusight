@@ -26,6 +26,15 @@ _PRIMARY_INK = "#1A1D23"
 _MUTED_INK = "#5F6570"
 _GRIDLINE = "#DCE0E7"
 
+# A genuine 0.0% bar renders with literally no visible mark -- confirmed
+# live, a true zero was indistinguishable at a glance from a missing/broken
+# data row (the label just floats at the left margin with no bar next to
+# it). This is a DISPLAY-only floor on the drawn bar length; the printed
+# percentage and the hover tooltip both still read the true value via
+# `customdata`, so a confirmed-zero category still says "0.0%" -- it just
+# now also gets a thin visible tick instead of nothing.
+_MIN_VISIBLE_BAR = 1.5
+
 
 def probability_bar_chart(detection: dict) -> go.Figure:
     """Horizontal bar chart of the 5-class DR severity probability
@@ -33,7 +42,8 @@ def probability_bar_chart(detection: dict) -> go.Figure:
     (pipeline.run_pipeline()'s "detection" key, when not None).
     """
     labels = [SEVERITY_LABELS[i] for i in range(5)]
-    values = [p * 100 for p in detection["probabilities"]]
+    true_values = [p * 100 for p in detection["probabilities"]]
+    display_values = [max(v, _MIN_VISIBLE_BAR) for v in true_values]
     predicted_idx = detection["class_idx"]
 
     # Selective direct labels: every bar gets its value (there are only
@@ -42,20 +52,21 @@ def probability_bar_chart(detection: dict) -> go.Figure:
     # stay in muted/secondary ink so the emphasis reads as "this one",
     # never by recoloring a bar itself (that would break the ordinal
     # severity-ramp meaning).
-    text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(values)]
+    text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(true_values)]
     text_colors = [_PRIMARY_INK if i == predicted_idx else _MUTED_INK for i in range(5)]
 
     figure = go.Figure(
         go.Bar(
-            x=values,
+            x=display_values,
             y=labels,
             orientation="h",
             marker=dict(color=_ORDINAL_RAMP, cornerradius=4),
             text=text_labels,
             textposition="outside",
             textfont=dict(color=text_colors),
+            customdata=true_values,
             cliponaxis=False,
-            hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+            hovertemplate="%{y}: %{customdata:.1f}%<extra></extra>",
         )
     )
     figure.update_layout(
@@ -99,24 +110,26 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
     only existing in the PDF-mirror report preview.
     """
     display_labels = [labels[i] for i in range(2)]
-    values = [p * 100 for p in detection["probabilities"]]
+    true_values = [p * 100 for p in detection["probabilities"]]
+    display_values = [max(v, _MIN_VISIBLE_BAR) for v in true_values]
     predicted_idx = detection["class_idx"]
     bar_colors = [_TEAL, _COPPER]
 
-    text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(values)]
+    text_labels = [f"<b>{v:.1f}%</b>" if i == predicted_idx else f"{v:.1f}%" for i, v in enumerate(true_values)]
     text_colors = [_PRIMARY_INK if i == predicted_idx else _MUTED_INK for i in range(2)]
 
     figure = go.Figure(
         go.Bar(
-            x=values,
+            x=display_values,
             y=display_labels,
             orientation="h",
             marker=dict(color=bar_colors, cornerradius=4),
             text=text_labels,
             textposition="outside",
             textfont=dict(color=text_colors),
+            customdata=true_values,
             cliponaxis=False,
-            hovertemplate="%{y}: %{x:.1f}%<extra></extra>",
+            hovertemplate="%{y}: %{customdata:.1f}%<extra></extra>",
         )
     )
     figure.update_layout(
