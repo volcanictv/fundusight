@@ -552,7 +552,7 @@ def _resolve_image_source() -> tuple[str, np.ndarray | None]:
     if st.session_state.get("demo_mode"):
         demo_images = list_demo_images()
         if not demo_images:
-            st.info("No local demo images found — download APTOS 2019 per the README to use demo mode.")
+            st.info("No demo images bundled with this build — upload your own fundus photo instead.")
         else:
             options = {f"{item['label']} — {item['id_code']}": item for item in demo_images}
             choice = st.selectbox("Sample image", list(options), key="demo_sample")
