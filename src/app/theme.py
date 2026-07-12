@@ -442,15 +442,26 @@ div[data-testid="stExpander"] {{
     margin-top: 0.6rem;
 }}
 
-/* The Preprocessing tile (Overview row) -- same glass card treatment as
-   its row neighbor, the Image Quality tile. Previously rendered as bare
+/* The Preprocessing tile (Overview row) -- same glass card LOOK as its
+   row neighbor, the Image Quality tile (previously rendered as bare
    images directly on the page background, the one Overview-row element
    still without a card, which a design-review pass flagged as breaking
-   the row's visual harmony. */
+   the row's visual harmony) -- but deliberately WITHOUT backdrop-filter,
+   unlike every other glass card in this file. Confirmed live: this is
+   the one glass card that wraps real <img> content (the before/after
+   preprocessing photos), and backdrop-filter -- like transform/filter/
+   perspective -- makes an element a containing block for `position:
+   fixed` descendants. Streamlit's native image-fullscreen overlay is
+   `position: fixed` and expects the viewport as its containing block;
+   with backdrop-filter here, clicking fullscreen on either photo instead
+   trapped the expanded view inside this card's own small bounds -- the
+   exact bug an earlier pass fixed for a different root cause (an
+   animation's residual transform), now reproduced by a different
+   property on a card that didn't exist yet at the time. A near-opaque
+   plain background (no blur-through) keeps the same visual weight
+   without creating that containing block. */
 [class*="st-key-vdx-preprocessing-card"] {{
-    background: var(--vdx-glass);
-    backdrop-filter: blur(24px);
-    -webkit-backdrop-filter: blur(24px);
+    background: rgba(255, 255, 255, 0.88);
     border: 1px solid var(--vdx-glass-border);
     border-radius: 16px;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);

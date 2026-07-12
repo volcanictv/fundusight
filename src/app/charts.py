@@ -71,12 +71,22 @@ def probability_bar_chart(detection: dict) -> go.Figure:
         )
     )
     figure.update_layout(
-        height=280,
+        # 220, not the original 280 -- these charts are now always visible
+        # (not behind a collapsed expander), directly beside Glaucoma/AMD's
+        # 2-row binary charts (140px, now bumped to 160px -- see
+        # binary_probability_chart() below) in the same row. A design-
+        # review pass found the 140px gap between 280 and the old binary
+        # height left a large blank rectangle of bare page background
+        # under the two shorter cards before the next section heading --
+        # not just an uneven bottom edge, an actual dead-space hole.
+        # Narrowing the gap to 60px (220 vs 160) keeps DR's 5 rows legible
+        # while closing most of that hole.
+        height=220,
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK),
-        bargap=0.45,  # air around each bar -- never fill the category slot
+        bargap=0.35,  # air around each bar -- never fill the category slot
         xaxis=dict(
             range=[0, 112],
             showgrid=True,
@@ -135,12 +145,15 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
         )
     )
     figure.update_layout(
-        height=140,
+        # See probability_bar_chart()'s comment above -- bumped from 140 to
+        # narrow the height gap against DR's chart (now 220, was 280) now
+        # that both sit always-visible in the same Disease Screening row.
+        height=160,
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(family="-apple-system, 'Segoe UI', sans-serif", color=_PRIMARY_INK),
-        bargap=0.5,
+        bargap=0.45,
         xaxis=dict(
             range=[0, 112],
             showgrid=True,

@@ -339,11 +339,7 @@ def render_image_comparison(result: dict) -> None:
     reasoning as why the Report Preview section only appears once
     `result` is final.
     """
-    header_col, method_col = st.columns([3, 1], vertical_alignment="bottom")
-    with header_col:
-        st.subheader("Image Comparison")
-    with method_col:
-        st.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
+    st.subheader("Image Comparison")
 
     images = {
         "Original": result["preprocessing_preview"]["before"],
@@ -360,7 +356,17 @@ def render_image_comparison(result: dict) -> None:
 
     options = list(images)
     default_selection = options[:2]
-    st.caption("Select two or more views to compare them side by side. Hover an image to magnify.")
+    # The Explainability method selectbox sits directly above "Compare
+    # views" now, not next to the "Image Comparison" heading above -- a
+    # design-review pass found it read as floating/ambiguously grouped up
+    # there (nothing visually tied it to the Grad-CAM options it actually
+    # controls). Sitting immediately beside the pills it affects should
+    # read as clearly connected instead.
+    caption_col, method_col = st.columns([3, 1], vertical_alignment="center")
+    with caption_col:
+        st.caption("Select two or more views to compare them side by side. Hover an image to magnify.")
+    with method_col:
+        st.selectbox("Explainability method", options=list(CAM_METHODS), index=0, key="cam_method")
     selected = st.pills(
         "Compare views", options, selection_mode="multi", default=default_selection, key="image_compare"
     )
@@ -602,7 +608,7 @@ st.header("Results")
 # demo mode / the image source -- the same session-state-keyed controls
 # render_intake_screen() uses -- live in this collapsed-by-default expander
 # instead, reachable without bringing back the full-page intake panel.
-with st.expander("Change patient / image"):
+with st.expander("Change patient / image", icon=":material/edit:"):
     st.text_input("Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id")
     st.toggle(
         "Demo mode",
