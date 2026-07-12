@@ -39,9 +39,16 @@ intake controls (patient ID / demo toggle / uploader, permanently pinned
 in `st.sidebar`) with a centered "Patient Intake & Signal Acquisition"
 glass panel (render_intake_screen(), below) shown before an image is
 available -- the reference mockup's one concrete screen, reproduced
-directly. The sidebar still holds one setting (explainability method)
-that only matters once results exist, so it stays there rather than
-cluttering the intake panel with a control that isn't relevant yet.
+directly.
+
+Fourth redesign pass: the sidebar itself is gone entirely, not just no
+longer the intake screen's controls -- it was the one surface never
+re-themed to match everything else, and didn't earn its keep once the wide
+layout below doesn't need to share the viewport with it. Patient ID / demo
+mode / image source now live in a "Change patient / image" expander on the
+results page (collapsed by default); the explainability method selectbox,
+its one other former occupant, moved next to the Image Comparison pills it
+actually controls (see render_image_comparison()).
 
 v2 (kept): the pipeline runs progressively, not behind one opaque spinner.
 Each stage still gets its own st.empty() placeholder, filled the moment it
@@ -191,7 +198,11 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
     # show, so it alone gets a 5-row chart rather than forcing every
     # disease tile into an identical shape.
     with st.container(key="vdx-chart-dr"):
-        st.plotly_chart(probability_bar_chart(detection), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(
+            probability_bar_chart(detection),
+            width="stretch",
+            config={"displayModeBar": False, "staticPlot": True},
+        )
         if cam_overlay is not None:
             # The tile itself only ever showed the pill+ring+chart -- the
             # actual Grad-CAM heatmap lives in Image Comparison further
@@ -223,28 +234,45 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
     # section()'s comment for why.
     with st.container(key="vdx-chart-glaucoma"):
         st.plotly_chart(
-            binary_probability_chart(glaucoma, GLAUCOMA_LABELS), width="stretch", config={"displayModeBar": False}
+            binary_probability_chart(glaucoma, GLAUCOMA_LABELS),
+            width="stretch",
+            config={"displayModeBar": False, "staticPlot": True},
         )
         if cam_overlay is not None:
             st.caption('Grad-CAM overlay: see "Grad-CAM (Glaucoma)" in Image Comparison below.')
 
 
+_AMD_TITLE = "Age-Related Macular Degeneration (AMD)"
+
+
 def render_amd_section(amd: dict | None, cam_overlay) -> None:
     if amd is None:
-        _unavailable_tile("AMD")
+        _unavailable_tile(_AMD_TITLE)
         return
     variant = "normal" if amd["class_idx"] == 0 else "attention"
     color = _PRIMARY if variant == "normal" else _TERTIARY
     render_stat_tile(
-        "AMD",
+        _AMD_TITLE,
         amd["label"],
         variant,
         f"{amd['probability'] * 100:.0f}%",
         amd["probability"] * 100,
         ring_color=color,
     )
+    # staticPlot=True on all three Disease Screening charts (here and in
+    # render_detection_section/render_glaucoma_section below) -- a design-
+    # review pass asked for these to be read-only: every value they show is
+    # already printed as a direct on-bar label (see charts.py), so the
+    # interactive drag-zoom/hover Plotly gives by default added editable-
+    # feeling affordance (a rubber-band zoom box, a reset-axes corner
+    # button) without adding any information a static image doesn't
+    # already have.
     with st.container(key="vdx-chart-amd"):
-        st.plotly_chart(binary_probability_chart(amd, AMD_LABELS), width="stretch", config={"displayModeBar": False})
+        st.plotly_chart(
+            binary_probability_chart(amd, AMD_LABELS),
+            width="stretch",
+            config={"displayModeBar": False, "staticPlot": True},
+        )
         if cam_overlay is not None:
             st.caption('Grad-CAM overlay: see "Grad-CAM (AMD)" in Image Comparison below.')
 
@@ -341,16 +369,37 @@ def render_image_comparison(result: dict) -> None:
     """
     st.subheader("Image Comparison")
 
+    original = result["preprocessing_preview"]["before"]
     images = {
-        "Original": result["preprocessing_preview"]["before"],
+        "Original": original,
         "Preprocessed": result["preprocessing_preview"]["after"],
     }
+    # Grad-CAM overlays come back at the model's fixed square input
+    # resolution (see explainability/gradcam.py's IMAGE_SIZE resize, done
+    # before inference), not the photo's own aspect ratio -- confirmed live
+    # (a 2056x2124 demo photo's overlay was a hard 224x224 square). Next to
+    # Original/Preprocessed/the vessel and optic-disc overlays (all of
+    # which keep the source aspect ratio), that mismatch is exactly why
+    # Grad-CAM tiles looked out of sync in this grid: same column width,
+    # different height, so rows never lined up. Stretching the square
+    # overlay back out to Original's own (height, width) is the correct
+    # undo of that resize -- the heatmap's pixel grid already maps 1:1
+    # onto the square-resized photo, so restoring the original aspect
+    # ratio realigns it with Original/Preprocessed instead of distorting
+    # it. Display-only; the model/CAM generation itself is untouched.
+    _target_hw = (original.shape[1], original.shape[0])  # cv2.resize wants (width, height)
+
+    def _match_original_aspect(overlay: np.ndarray) -> np.ndarray:
+        if overlay.shape[:2] == original.shape[:2]:
+            return overlay
+        return cv2.resize(overlay, _target_hw, interpolation=cv2.INTER_LINEAR)
+
     if result["cam_overlay"] is not None:
-        images["Grad-CAM (DR)"] = result["cam_overlay"]
+        images["Grad-CAM (DR)"] = _match_original_aspect(result["cam_overlay"])
     if result["glaucoma_cam_overlay"] is not None:
-        images["Grad-CAM (Glaucoma)"] = result["glaucoma_cam_overlay"]
+        images["Grad-CAM (Glaucoma)"] = _match_original_aspect(result["glaucoma_cam_overlay"])
     if result["amd_cam_overlay"] is not None:
-        images["Grad-CAM (AMD)"] = result["amd_cam_overlay"]
+        images["Grad-CAM (AMD)"] = _match_original_aspect(result["amd_cam_overlay"])
     images["Vessel mask"] = overlays.vessel_mask_overlay(result["working_image"], result["vessels"])
     images["Optic disc"] = overlays.optic_disc_overlay(result["working_image"], result["optic_disc"])
 
@@ -375,7 +424,17 @@ def render_image_comparison(result: dict) -> None:
 
     for start in range(0, len(selected), _MAX_COMPARISON_IMAGES_PER_ROW):
         chunk = selected[start : start + _MAX_COMPARISON_IMAGES_PER_ROW]
-        columns = st.columns(len(chunk))
+        # Always allocate a full _MAX_COMPARISON_IMAGES_PER_ROW columns, even
+        # when this row's chunk is smaller (the last row, whenever the
+        # selection count isn't a multiple of the row width) -- st.columns
+        # divides available width by however many columns you ask for, so
+        # asking for just len(chunk) let a half-empty last row's images
+        # stretch wider than a full row's (confirmed live: a lone image in
+        # a 1-column "row" rendered ~3x the size of images sharing a
+        # 3-column row). Leaving the remainder of a short row's columns
+        # empty keeps every image the same grid-cell size regardless of
+        # how many views are selected.
+        columns = st.columns(_MAX_COMPARISON_IMAGES_PER_ROW)
         for column, name in zip(columns, chunk):
             with column:
                 st.image(_to_rgb(images[name]), caption=name, width="stretch")
@@ -454,12 +513,11 @@ st.markdown(
 )
 
 
-
-def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
+def _resolve_image_source() -> tuple[str, np.ndarray | None]:
     """Demo-sample picker or file uploader, whichever `demo_mode` (already
-    rendered by the caller) selects. `container` is `st` (main area) or
-    `st.sidebar` -- same two widgets either way, just placed differently
-    depending on render_intake_screen() vs. the compact sidebar path below.
+    rendered by the caller) selects. Shared by render_intake_screen() and
+    the post-intake "Change patient / image" expander -- same two widgets
+    either way.
     """
     patient_id_input = st.session_state.get("patient_id", "")
     effective_patient_id = patient_id_input
@@ -468,15 +526,15 @@ def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
     if st.session_state.get("demo_mode"):
         demo_images = list_demo_images()
         if not demo_images:
-            container.info("No local demo images found — download APTOS 2019 per the README to use demo mode.")
+            st.info("No local demo images found — download APTOS 2019 per the README to use demo mode.")
         else:
             options = {f"{item['label']} — {item['id_code']}": item for item in demo_images}
-            choice = container.selectbox("Sample image", list(options), key="demo_sample")
+            choice = st.selectbox("Sample image", list(options), key="demo_sample")
             selected = options[choice]
             image = load_demo_image(selected["path"])
             if not effective_patient_id:
                 effective_patient_id = f"DEMO-{selected['id_code']}"
-    elif container is st:
+    else:
         # The intake panel composes its own icon + heading + caption INSIDE
         # the same dashed box as the uploader (see .st-key-vdx-dropzone-
         # wrapper in theme.py, which strips the native dropzone's own
@@ -495,15 +553,9 @@ def _resolve_image_source(*, container) -> tuple[str, np.ndarray | None]:
                 "</div>",
                 unsafe_allow_html=True,
             )
-            uploaded = container.file_uploader(
+            uploaded = st.file_uploader(
                 "Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader", label_visibility="collapsed"
             )
-        if uploaded is not None:
-            image = _decode_upload(uploaded)
-    else:
-        # Compact sidebar path: no custom heading, so the native label
-        # stays as the only one.
-        uploaded = container.file_uploader("Upload a fundus photo", type=["png", "jpg", "jpeg"], key="file_uploader")
         if uploaded is not None:
             image = _decode_upload(uploaded)
 
@@ -516,9 +568,10 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
     reproduced directly (see this module's docstring). Shown only before
     the user has both picked an image source AND clicked "Initialize
     analysis" for the first time this session; after that, the same
-    session-state-keyed controls move to a compact sidebar instead (see
-    the call site below) so they stay reachable without this panel taking
-    over the page every time settings change.
+    session-state-keyed controls move into a collapsed "Change patient /
+    image" expander instead (see the call site below) so they stay
+    reachable without this panel taking over the page every time settings
+    change.
 
     Returns (effective_patient_id, image, initialize_clicked).
     """
@@ -561,7 +614,7 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
                 key="patient_id",
                 label_visibility="collapsed",
             )
-            effective_patient_id, image = _resolve_image_source(container=st)
+            effective_patient_id, image = _resolve_image_source()
 
             st.markdown('<div style="height: 0.75rem"></div>', unsafe_allow_html=True)
             initialize_clicked = st.button(
@@ -601,13 +654,10 @@ if not _started:
 
 st.header("Results")
 
-# No persistent sidebar in this design (removed per a design-review pass --
-# it was the one surface never re-themed to match everything else, and a
-# permanent side panel doesn't earn its keep once the wide layout below
-# doesn't need to share the viewport with it on every screen). Patient ID /
-# demo mode / the image source -- the same session-state-keyed controls
-# render_intake_screen() uses -- live in this collapsed-by-default expander
-# instead, reachable without bringing back the full-page intake panel.
+# Same session-state-keyed controls render_intake_screen() uses (see this
+# module's docstring for why there's no sidebar to put them in instead),
+# collapsed by default so they're reachable without bringing back the
+# full-page intake panel.
 with st.expander("Change patient / image", icon=":material/edit:"):
     st.text_input("Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id")
     st.toggle(
@@ -616,7 +666,7 @@ with st.expander("Change patient / image", icon=":material/edit:"):
         help="Try the app on a locally available sample image instead of uploading your own.",
         key="demo_mode",
     )
-    effective_patient_id, image = _resolve_image_source(container=st)
+    effective_patient_id, image = _resolve_image_source()
 
 if image is None:
     st.info('Upload a fundus photo or turn on demo mode under "Change patient / image" above to get started.')

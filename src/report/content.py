@@ -104,7 +104,15 @@ def _quality_section(quality: dict) -> Section:
         ("Overall score", f"{quality['score']:.1f} / 100"),
         ("Passed", "Yes" if quality["passed"] else "No"),
         ("Focus score", f"{focus['score']:.1f} / 100"),
+        # The raw measurements each 0-100 score above is derived from
+        # (preprocessing/quality.py's check_focus/check_exposure) were
+        # computed every run but never surfaced anywhere -- not the app,
+        # not the PDF -- only the normalized score was. A reader deciding
+        # whether to trust a borderline score benefits from seeing the
+        # actual measurement it came from, not just the 0-100 result.
+        ("Focus (Laplacian variance)", f"{focus['laplacian_variance']:.1f}"),
         ("Exposure score", f"{exposure['score']:.1f} / 100"),
+        ("Exposure (mean brightness)", f"{exposure['mean_brightness']:.1f} / 255"),
     ]
     return Section(title="Image Quality", kind="metric_grid", body={"rows": rows})
 

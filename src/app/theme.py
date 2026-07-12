@@ -245,6 +245,19 @@ div[data-testid="stMetricLabel"] {{
    motion on hover only, never on load/idle. A soft indigo-tinted glow
    shadow (the reference's `shadow-primary/20`) instead of a flat drop
    shadow reads as "the glass itself is lit from within", not just lifted. */
+/* `color: white` on the button itself only sets an INHERITED value for its
+   text -- st.download_button (and st.button with no explicit type=) render
+   as Streamlit's "secondary" kind, and Streamlit's own base CSS sets color
+   directly on the inner text node (the <p> inside stMarkdownContainer) to
+   its secondary-button text color (this app's own primary indigo, same as
+   the background here). A directly-matching rule on the element always
+   wins over an inherited one regardless of specificity, so that inner rule
+   silently beat this one -- indigo text on an indigo background, invisible
+   until :hover's opacity/transform change happened to reveal it (confirmed
+   live via computed style: color and background-color were the exact same
+   rgb() before hover). Targeting the inner node explicitly, at the same
+   depth Streamlit's own rule does, fixes it at the actual point of
+   conflict instead of on the ancestor. */
 .stButton > button, .stDownloadButton > button {{
     background-color: var(--vdx-primary);
     color: white;
@@ -254,6 +267,9 @@ div[data-testid="stMetricLabel"] {{
     font-weight: 600;
     box-shadow: 0 8px 20px rgba(53, 37, 205, 0.2);
     transition: opacity 0.15s ease, transform 0.15s ease;
+}}
+.stButton > button *, .stDownloadButton > button * {{
+    color: white;
 }}
 .stButton > button:hover, .stDownloadButton > button:hover {{
     opacity: 0.9;
@@ -330,27 +346,51 @@ div[data-testid="stExpander"] {{
    One reusable component (see app/components.py's render_ring()),
    parameterized entirely through inline CSS custom properties (--pct
    0-100, --ring-color). A thicker arc + an inset shadow on the inner disc
-   suggests a lens/eyepiece bezel rather than a flat progress ring. */
+   suggests a lens/eyepiece bezel rather than a flat progress ring.
+
+   `@property` registers --pct as a real animatable numeric value (browsers
+   otherwise treat all custom properties as opaque strings, which can't be
+   interpolated) -- this is what makes the fill-in animation below possible
+   at all. Every ring on the page uses this one rule (Image Quality, the
+   three Disease Screening tiles, Vessel Density, Vertical CDR), so bumping
+   the size or adding the animation here covers all of them in one place, a
+   design-review pass's "make all the circular charts bigger and animate
+   them" applied once instead of per call site. */
+@property --pct {{
+    syntax: "<number>";
+    inherits: true;
+    initial-value: 0;
+}}
+
+/* The animation only has a "from" keyframe -- CSS animations fill in an
+   implicit "to" keyframe from the element's own resolved --pct (the value
+   the inline style already sets), so this animates 0 -> the real value on
+   every mount without needing JS or a second, duplicated value anywhere. */
+@keyframes vdx-ring-fill {{
+    from {{ --pct: 0; }}
+}}
+
 .vdx-ring-card {{
-    padding: 0.75rem;
+    padding: 0.85rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
 }}
 
 .vdx-ring {{
     position: relative;
-    width: 60px;
-    height: 60px;
+    width: 84px;
+    height: 84px;
     border-radius: 50%;
     background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--vdx-track) 0);
     box-shadow: inset 0 1px 3px rgba(20, 23, 30, 0.15);
+    animation: vdx-ring-fill 1s ease-out;
 }}
 
 .vdx-ring-inner {{
     position: absolute;
-    inset: 8px;
+    inset: 11px;
     border-radius: 50%;
     background: var(--vdx-glass);
     box-shadow: inset 0 1px 2px rgba(20, 23, 30, 0.12);
@@ -358,7 +398,7 @@ div[data-testid="stExpander"] {{
     place-items: center;
     font-family: var(--vdx-font-mono);
     font-weight: 600;
-    font-size: 0.72rem;
+    font-size: 0.92rem;
     color: var(--vdx-text);
 }}
 
