@@ -1,10 +1,2 @@
-# System (apt) packages Streamlit Community Cloud installs before building
-# the Python venv. opencv-python's GUI bindings (highgui) dynamically link
-# against libGL/GLib even though this app never opens a GUI window -- these
-# aren't present on Streamlit Cloud's minimal container by default, and
-# without them `import cv2` crashes with "ImportError: libGL.so.1: cannot
-# open shared object file". grad-cam hard-requires plain opencv-python (not
-# the headless build), so this is the fix rather than swapping cv2 variants
-# -- see requirements.txt's comment on the opencv-python line.
 libgl1
 libglib2.0-0

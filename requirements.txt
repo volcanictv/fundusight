@@ -22,7 +22,10 @@ monai==1.6.0
 # installs both, and they collide over the same cv2/ package directory.
 # The GUI build's libGL.so.1 dependency (missing on minimal deployment
 # containers, e.g. Streamlit Community Cloud) is supplied instead via
-# packages.txt at the repo root -- see that file's comment.
+# packages.txt at the repo root, which installs libgl1/libglib2.0-0 via
+# apt -- packages.txt itself must stay comment-free: unlike this file,
+# Streamlit Cloud's packages.txt installer doesn't strip '#' lines and
+# instead tries to apt-get install every word in them literally.
 opencv-python==5.0.0.93
 scikit-image==0.26.0
 
