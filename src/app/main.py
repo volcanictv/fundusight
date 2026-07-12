@@ -112,7 +112,7 @@ def _ensure_checkpoints() -> list[str]:
 
 # set_page_config must be the first Streamlit command in the script, so the
 # (cached, spinner-showing) checkpoint fetch has to come after it.
-st.set_page_config(page_title="Fundusight", page_icon="\U0001f441", layout="wide")
+st.set_page_config(page_title="Fundusight", page_icon="\U0001f7e3", layout="wide")
 _ensure_checkpoints()
 inject_css()
 inject_ambient_cursor()
