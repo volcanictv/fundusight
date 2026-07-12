@@ -1,13 +1,11 @@
-"""Phase 9: DR severity probability chart.
+"""DR severity probability chart.
 
 Severity is ORDINAL (swapping the class order would change its meaning),
 not nominal categorical identity -- per the dataviz skill's color-formula.md
 this takes a single one-hue ramp with monotone lightness, not the
 categorical eight-hue palette. The ramp below is this app's own primary
-accent indigo (--vdx-primary, #3525CD -- see theme.py's module docstring
-for the "Clinical Liquid Glass" reference this re-hue matches) stepped
-light->dark, same single-hue/monotone-lightness shape as the ramp it
-replaces.
+accent indigo (--fdx-primary, #3525CD -- see theme.py's module docstring
+for the "Clinical Liquid Glass" palette) stepped light->dark.
 
 A single "series" (the probability distribution) needs no legend box per
 the same reference -- identity here comes from the y-axis category labels,
@@ -27,13 +25,12 @@ _PRIMARY_INK = "#191C1E"
 _MUTED_INK = "#464555"
 _GRIDLINE = "#C7C4D8"
 
-# A genuine 0.0% bar renders with literally no visible mark -- confirmed
-# live, a true zero was indistinguishable at a glance from a missing/broken
-# data row (the label just floats at the left margin with no bar next to
-# it). This is a DISPLAY-only floor on the drawn bar length; the printed
-# percentage and the hover tooltip both still read the true value via
-# `customdata`, so a confirmed-zero category still says "0.0%" -- it just
-# now also gets a thin visible tick instead of nothing.
+# A genuine 0.0% bar renders with no visible mark -- indistinguishable at a
+# glance from a missing/broken data row (the label just floats at the left
+# margin with no bar next to it). This is a DISPLAY-only floor on the drawn
+# bar length; the printed percentage and the hover tooltip both still read
+# the true value via `customdata`, so a confirmed-zero category still says
+# "0.0%" -- it just now also gets a thin visible tick instead of nothing.
 _MIN_VISIBLE_BAR = 1.5
 
 
@@ -71,16 +68,10 @@ def probability_bar_chart(detection: dict) -> go.Figure:
         )
     )
     figure.update_layout(
-        # 220, not the original 280 -- these charts are now always visible
-        # (not behind a collapsed expander), directly beside Glaucoma/AMD's
-        # 2-row binary charts (140px, now bumped to 160px -- see
-        # binary_probability_chart() below) in the same row. A design-
-        # review pass found the 140px gap between 280 and the old binary
-        # height left a large blank rectangle of bare page background
-        # under the two shorter cards before the next section heading --
-        # not just an uneven bottom edge, an actual dead-space hole.
-        # Narrowing the gap to 60px (220 vs 160) keeps DR's 5 rows legible
-        # while closing most of that hole.
+        # 220px keeps DR's 5 rows legible while staying close to
+        # binary_probability_chart()'s 160px, since both sit side by side
+        # in the same Disease Screening row and a larger gap would leave a
+        # dead-space hole under the two shorter binary charts.
         height=220,
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",
@@ -145,9 +136,7 @@ def binary_probability_chart(detection: dict, labels: dict) -> go.Figure:
         )
     )
     figure.update_layout(
-        # See probability_bar_chart()'s comment above -- bumped from 140 to
-        # narrow the height gap against DR's chart (now 220, was 280) now
-        # that both sit always-visible in the same Disease Screening row.
+        # See probability_bar_chart()'s height comment above.
         height=160,
         margin=dict(l=10, r=40, t=10, b=10),
         plot_bgcolor="rgba(0,0,0,0)",

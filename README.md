@@ -6,6 +6,9 @@ glaucoma, AMD) → explainability (Grad-CAM/EigenCAM/LayerCAM) → vessel and
 optic-disc/cup biomarkers → PDF report, tied together by a Streamlit
 dashboard.
 
+**Live demo:** https://fundusight-main.streamlit.app/ (try it with "Demo
+mode" — no upload needed)
+
 **This is an educational/portfolio project, not a diagnostic device.** No
 output here should be treated as clinical advice.
 
@@ -165,9 +168,11 @@ no classical fallback and simply don't appear in the report/app.
 This is meant to be deployed once, as a live portfolio demo, via [Streamlit
 Community Cloud](https://share.streamlit.io), which builds an app straight
 from a GitHub repository URL — no separate server or hosting account to
-manage. Since checkpoints are never committed to git (see "Trained
-weights" above), a fresh deploy starts with none locally; the app fetches
-them itself from this repo's GitHub Releases assets.
+manage. This repo's own instance is live at
+https://fundusight-main.streamlit.app/. Since checkpoints are never
+committed to git (see "Trained weights" above), a fresh deploy starts with
+none locally; the app fetches them itself from this repo's GitHub Releases
+assets.
 
 **How the checkpoint fetch works:** `src/app/main.py` calls
 `fetch_checkpoints()` (`src/app/checkpoints.py`) once per process on

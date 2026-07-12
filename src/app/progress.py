@@ -1,8 +1,8 @@
-"""Dashboard v2: the loading/progress experience.
+"""The loading/progress experience.
 
-Fixes the "did the site crash?" problem the opaque single st.spinner() had:
-a sticky banner that stays pinned to the viewport regardless of scroll
-position (see theme.py's .vdx-progress-banner CSS), paired with skeleton
+Fixes the "did the site crash?" problem an opaque single st.spinner() has:
+a banner that stays pinned to the viewport regardless of scroll position
+(see theme.py's .fdx-progress-banner CSS), paired with skeleton
 placeholders for every result section so the whole results area shows
 loading shape immediately instead of staying blank until the entire ~10-30s
 pipeline finishes. Also the one place a mid-pipeline exception gets turned
@@ -50,11 +50,11 @@ class ProgressBanner:
             # divs) and floats over that reserved gap, staying pinned
             # regardless of scroll.
             st.markdown(
-                f"""<div class="vdx-progress-banner-spacer"></div>
-<div class="vdx-progress-banner">
-    <div class="vdx-progress-label">{html.escape(label)}</div>
-    <div class="vdx-progress-track">
-        <div class="vdx-progress-fill" style="width:{fraction * 100:.1f}%"></div>
+                f"""<div class="fdx-progress-banner-spacer"></div>
+<div class="fdx-progress-banner">
+    <div class="fdx-progress-label">{html.escape(label)}</div>
+    <div class="fdx-progress-track">
+        <div class="fdx-progress-fill" style="width:{fraction * 100:.1f}%"></div>
     </div>
 </div>""",
                 unsafe_allow_html=True,
@@ -74,14 +74,14 @@ def render_skeleton(stage_key: str) -> None:
     shape reused everywhere is enough; no need for 5 bespoke ones.
     """
     st.markdown(
-        f"""<div class="vdx-skeleton" data-stage="{html.escape(stage_key)}">
-    <div class="vdx-skeleton-box vdx-skeleton-title vdx-shimmer"></div>
-    <div class="vdx-skeleton-metrics">
-        <div class="vdx-skeleton-box vdx-skeleton-pill vdx-shimmer"></div>
-        <div class="vdx-skeleton-box vdx-skeleton-pill vdx-shimmer"></div>
-        <div class="vdx-skeleton-box vdx-skeleton-pill vdx-shimmer"></div>
+        f"""<div class="fdx-skeleton" data-stage="{html.escape(stage_key)}">
+    <div class="fdx-skeleton-box fdx-skeleton-title fdx-shimmer"></div>
+    <div class="fdx-skeleton-metrics">
+        <div class="fdx-skeleton-box fdx-skeleton-pill fdx-shimmer"></div>
+        <div class="fdx-skeleton-box fdx-skeleton-pill fdx-shimmer"></div>
+        <div class="fdx-skeleton-box fdx-skeleton-pill fdx-shimmer"></div>
     </div>
-    <div class="vdx-skeleton-box vdx-skeleton-image vdx-shimmer"></div>
+    <div class="fdx-skeleton-box fdx-skeleton-image fdx-shimmer"></div>
 </div>""",
         unsafe_allow_html=True,
     )
@@ -94,9 +94,9 @@ def render_error_card(exc: Exception) -> None:
     """
     traceback.print_exc()
     st.markdown(
-        f"""<div class="vdx-error-card">
-    <div class="vdx-error-title">Something went wrong while analyzing this image.</div>
-    <div class="vdx-error-detail">{html.escape(str(exc))}</div>
+        f"""<div class="fdx-error-card">
+    <div class="fdx-error-title">Something went wrong while analyzing this image.</div>
+    <div class="fdx-error-detail">{html.escape(str(exc))}</div>
 </div>""",
         unsafe_allow_html=True,
     )

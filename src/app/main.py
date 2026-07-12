@@ -1,59 +1,14 @@
-"""Phase 9 / redesign: Streamlit dashboard.
+"""Streamlit dashboard: ties every pipeline stage together (upload or demo
+mode -> quality -> preprocessing preview -> DR/glaucoma/AMD detection with
+Grad-CAM -> vessel biomarkers -> optic disc/cup/CDR -> recommendation
+summary -> PDF download).
 
-Ties every pipeline stage together: upload (or demo mode) -> quality ->
-preprocessing preview -> DR/glaucoma/AMD detection + Grad-CAM each ->
-vessel biomarkers -> optic disc/cup/CDR -> a recommendation summary -> PDF
-download.
-
-Redesign pass: the page is now a dense multi-column dashboard instead of
-seven full-width stacked sections. Three ROW groups (Overview / Disease
-Screening / Biomarkers) each hold their stages side by side in columns.
-The Disease Screening row in particular replaces what used to be three
-near-identical full sections (subheader + pill + ring + datagrid +
-full-size Grad-CAM image, once each for DR/glaucoma/AMD) with three
-compact tiles -- the Grad-CAM images moved to the existing Image Comparison
-viewer at the bottom instead of repeating three times inline.
-
-Second redesign pass: the page used to ALSO render a full second
-"Report Preview" walk through report/content.py's Section list -- quality
-metrics, preprocessing before/after, each detection's text+table+image,
-vessel/optic-disc metrics+image -- immediately below everything above,
-duplicating essentially all of it a second time (the whole point of that
-walk was "verify what's in the PDF before downloading it", but by this
-point every number and image it showed already exists on the page). That
-walk is gone. What replaces it: Glaucoma/AMD tiles gained the same
-probability-breakdown expander DR already had (previously that split was
-only visible in the deleted walk-through's table), and the "Recommendation"
-text -- the one genuinely unique thing that walk had -- now renders directly
-via render_recommendation_card() (components.py) instead of being buried at
-the bottom of a page-length duplicate. app/render_preview.py is deleted
-along with it; nothing else imported its Section-walking helpers.
-
-Third redesign pass ("Clinical Liquid Glass"): the whole visual language --
-colors, fonts, glass treatment, icons -- was replaced wholesale to match a
-Stitch-generated reference mockup the user supplied directly (`Front-End
-Template/stitch_visiondx_retinal_screening_dashboard/`), not iterated on
-from scratch. See theme.py's module docstring for the token-level
-rationale. Structurally, this pass also replaces the old sidebar-only
-intake controls (patient ID / demo toggle / uploader, permanently pinned
-in `st.sidebar`) with a centered "Patient Intake & Signal Acquisition"
-glass panel (render_intake_screen(), below) shown before an image is
-available -- the reference mockup's one concrete screen, reproduced
-directly.
-
-Fourth redesign pass: the sidebar itself is gone entirely, not just no
-longer the intake screen's controls -- it was the one surface never
-re-themed to match everything else, and didn't earn its keep once the wide
-layout below doesn't need to share the viewport with it. Patient ID / demo
-mode / image source now live in a "Change patient / image" expander on the
-results page (collapsed by default); the explainability method selectbox,
-its one other former occupant, moved next to the Image Comparison pills it
-actually controls (see render_image_comparison()).
-
-v2 (kept): the pipeline runs progressively, not behind one opaque spinner.
-Each stage still gets its own st.empty() placeholder, filled the moment it
-finishes (via report/pipeline.run_pipeline()'s on_stage callback), behind a
-sticky progress banner. See app/progress.py.
+The results area is a dense multi-column grid (Overview / Disease
+Screening / Biomarkers rows, see _ROWS below), not stacked full-width
+sections. Each stage gets its own st.empty() placeholder that fills in
+place as report/pipeline.py's run_pipeline() finishes it (see on_stage
+below and app/progress.py's ProgressBanner), so the page doesn't sit
+behind one opaque spinner.
 
 Run with (from the repo root, matching this project's Windows venv
 convention -- see README):
@@ -122,8 +77,8 @@ render_header()
 # CSS custom-property references, not hex literals -- theme.py's :root is
 # the single source of truth for these two accent colors; every caller here
 # just points at it rather than duplicating hex values.
-_PRIMARY = "var(--vdx-primary)"
-_TERTIARY = "var(--vdx-tertiary)"
+_PRIMARY = "var(--fdx-primary)"
+_TERTIARY = "var(--fdx-tertiary)"
 
 
 def _to_rgb(array: np.ndarray) -> np.ndarray:
@@ -140,25 +95,22 @@ def _safe_filename(text: str) -> str:
 
 
 def _tile_label(text: str) -> None:
-    # Reuses the same serif micro-heading style render_stat_tile()'s own
-    # title uses (see theme.py's .vdx-stat-tile-title) so every column in
-    # the dense grid below -- disease tiles included -- reads as one
-    # consistent family of "instrument readouts," not a mix of full
-    # st.subheader blocks and small ad-hoc labels.
-    st.markdown(f'<div class="vdx-stat-tile-title">{html.escape(text)}</div>', unsafe_allow_html=True)
+    # Matches render_stat_tile()'s title style (theme.py's
+    # .fdx-stat-tile-title) so every column in the dense grid below reads
+    # as one consistent family, not a mix of st.subheader and ad-hoc labels.
+    st.markdown(f'<div class="fdx-stat-tile-title">{html.escape(text)}</div>', unsafe_allow_html=True)
 
 
 def _unavailable_tile(title: str) -> None:
     st.markdown(
-        f'<div class="vdx-stat-tile"><div class="vdx-stat-tile-title">{html.escape(title)}</div>'
-        f'<div class="vdx-caption">Model not available in this build — no trained checkpoint was found.</div></div>',
+        f'<div class="fdx-stat-tile"><div class="fdx-stat-tile-title">{html.escape(title)}</div>'
+        f'<div class="fdx-caption">Model not available in this build — no trained checkpoint was found.</div></div>',
         unsafe_allow_html=True,
     )
 
 
-# --- Per-section renderers. Each is exactly what used to be inline code
-# here before v2 -- extracted so both the progressive (cache-miss) and
-# direct (cache-hit) render paths below can call the same functions. ---
+# Per-section renderers, shared by both the progressive (cache-miss) and
+# direct (cache-hit) render paths below.
 
 
 def render_quality_section(quality: dict) -> None:
@@ -180,20 +132,10 @@ def render_quality_section(quality: dict) -> None:
 
 
 def render_preprocessing_section(preview: dict) -> None:
-    # Side-by-side before/after -- a single "after" image (this tile's
-    # shape before the Report Preview merge) meant the only way to actually
-    # compare original vs. preprocessed was flipping between two pills in
-    # Image Comparison one at a time, with nothing to hold the earlier
-    # frame against. Showing both here restores a simultaneous comparison
-    # without bringing back a full duplicate walk -- Image Comparison still
-    # covers the same two images individually at full size for closer
-    # inspection, this is just the side-by-side "what changed" view.
-    # Wrapped in the same glass card treatment as its Overview-row
-    # neighbor (the Image Quality ring+datagrid) -- a design-review pass
-    # flagged the Overview row's tiles as visually inconsistent, and this
-    # tile was the one still rendering as bare images/text directly on
-    # the page background instead of its own card.
-    with st.container(key="vdx-preprocessing-card"):
+    # Side-by-side before/after in the same glass card as its Overview-row
+    # neighbor -- Image Comparison below still covers each image
+    # individually at full size for closer inspection.
+    with st.container(key="fdx-preprocessing-card"):
         _tile_label("Preprocessing")
         before_col, after_col = st.columns(2)
         with before_col:
@@ -216,25 +158,19 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
         detection["probability"] * 100,
         ring_color=color,
     )
-    # Severity breakdown is now always visible, not tucked behind a
-    # collapsed expander -- a design-review pass flagged that the most
-    # informative view of a disease tile (the actual probability
-    # distribution) required an extra click nobody was prompted to make.
-    # DR is 5-class (not binary like glaucoma/AMD) -- genuinely has more to
-    # show, so it alone gets a 5-row chart rather than forcing every
-    # disease tile into an identical shape.
-    with st.container(key="vdx-chart-dr"):
+    # Always visible (not behind an expander) since the probability
+    # distribution is the most informative part of a disease tile. DR is
+    # 5-class, unlike glaucoma/AMD's binary charts, so it gets its own
+    # 5-row chart.
+    with st.container(key="fdx-chart-dr"):
         st.plotly_chart(
             probability_bar_chart(detection),
             width="stretch",
             config={"displayModeBar": False, "staticPlot": True},
         )
         if cam_overlay is not None:
-            # The tile itself only ever showed the pill+ring+chart -- the
-            # actual Grad-CAM heatmap lives in Image Comparison further
-            # down the page (see render_image_comparison()), with nothing
-            # on this tile pointing there. A one-line cross-reference beats
-            # making the reader already know it moved.
+            # Grad-CAM heatmap itself lives in Image Comparison further
+            # down the page (see render_image_comparison()), not repeated here.
             st.caption('Grad-CAM overlay: see "Grad-CAM (DR)" in Image Comparison below.')
 
 
@@ -252,13 +188,9 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         glaucoma["probability"] * 100,
         ring_color=color,
     )
-    # Parity with DR's breakdown chart -- this used to be the one place
-    # glaucoma's absent/present probability split was visible at all
-    # (buried in the old Report Preview walk, now merged away). Binary
-    # classifiers don't need DR's ordinal 5-row chart, just this 2-row
-    # one. Always visible, not behind an expander -- see render_detection_
-    # section()'s comment for why.
-    with st.container(key="vdx-chart-glaucoma"):
+    # Binary classifiers get a 2-row chart instead of DR's 5-row ordinal
+    # one, always visible for the same reason as render_detection_section().
+    with st.container(key="fdx-chart-glaucoma"):
         st.plotly_chart(
             binary_probability_chart(glaucoma, GLAUCOMA_LABELS),
             width="stretch",
@@ -286,14 +218,10 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
         ring_color=color,
     )
     # staticPlot=True on all three Disease Screening charts (here and in
-    # render_detection_section/render_glaucoma_section below) -- a design-
-    # review pass asked for these to be read-only: every value they show is
-    # already printed as a direct on-bar label (see charts.py), so the
-    # interactive drag-zoom/hover Plotly gives by default added editable-
-    # feeling affordance (a rubber-band zoom box, a reset-axes corner
-    # button) without adding any information a static image doesn't
-    # already have.
-    with st.container(key="vdx-chart-amd"):
+    # render_detection_section/render_glaucoma_section above): every value
+    # already has an on-bar label (see charts.py), so Plotly's default
+    # interactive zoom/hover would only add affordance, no information.
+    with st.container(key="fdx-chart-amd"):
         st.plotly_chart(
             binary_probability_chart(amd, AMD_LABELS),
             width="stretch",
@@ -304,12 +232,7 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
 
 
 def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> None:
-    # No inline overlay image here -- same density pattern the Disease
-    # Screening tiles already use: the vessel mask overlay is one of the
-    # views in the Image Comparison pills viewer below, so showing it again
-    # here would be the exact repeated-full-size-image redundancy that
-    # redesign already fixed for DR/glaucoma/AMD, just not carried through
-    # to this section yet.
+    # Vessel mask overlay lives in Image Comparison below, not repeated here.
     _tile_label("Vessel Biomarkers")
     ring_col, grid_col = st.columns([1, 2])
     with ring_col:
@@ -325,9 +248,7 @@ def render_vessel_section(vessel_result: dict, working_image: np.ndarray) -> Non
 
 
 def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray) -> None:
-    # Same redundancy fix as render_vessel_section above -- the disc/cup/
-    # macula overlay is already one of the Image Comparison views below, so
-    # it no longer repeats inline here.
+    # Disc/cup/macula overlay lives in Image Comparison below, not repeated here.
     _tile_label("Optic Disc / Cup / Macula")
     cdr = optic_disc_result["vertical_cdr"]
     # Same 0.5 elevated-CDR threshold report/content.py's recommendation
@@ -344,11 +265,10 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
             ]
         )
     if not optic_disc_result["disc_found"] or optic_disc_result["disc_diameter_px"] == 0:
-        # disc_found only reflects Stage 6.1's classical localization
-        # succeeding -- Stage 6.2's segmentation can still independently
-        # come back empty (a real, observed failure mode on out-of-domain
-        # input with the current provisional checkpoint, see ROADMAP.md's
-        # Phase 6 note), which disc_found alone wouldn't catch.
+        # disc_found only reflects classical localization succeeding --
+        # segmentation can independently come back empty on out-of-domain
+        # input (see ROADMAP.md's Phase 6 note), which disc_found alone
+        # wouldn't catch.
         st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
 
 
@@ -356,42 +276,19 @@ _MAX_COMPARISON_IMAGES_PER_ROW = 3
 
 
 def render_image_comparison(result: dict) -> None:
-    """A multi-select image viewer -- pick two or more views and see them
-    side by side simultaneously, via st.pills in multi-selection mode
-    (real Streamlit widget state/rerun handling -- not inert custom HTML
-    buttons, which can't communicate back to Python without a full custom
-    component). Reuses arrays already computed elsewhere in `result`/
-    overlays.* rather than recomputing anything. The ONLY place Grad-CAM
-    overlays are shown at full size -- the disease tiles above no longer
-    repeat them.
+    """Multi-select image viewer: pick two or more views via st.pills
+    (multi-selection mode) and see them side by side. Reuses arrays already
+    computed elsewhere in `result`/overlays.* rather than recomputing
+    anything. This is the only place Grad-CAM overlays are shown at full
+    size -- the disease tiles above don't repeat them.
 
-    Replaces an earlier single-selection version of this viewer (one pill
-    active at a time, one image shown) -- a design-review pass pointed out
-    that comparing two views meant memorizing one while looking at the
-    other, not an actual side-by-side comparison. Multi-selection with
-    row-chunked columns (_MAX_COMPARISON_IMAGES_PER_ROW) handles any
-    number of simultaneously selected views without any of them getting
-    too narrow to read. Hover any image for a magnified view (theme.py's
-    .vdx-zoom-* rules, Amazon-product-page style) instead of Streamlit's
-    native fullscreen click-to-expand, which is no longer the primary way
-    to inspect these closely (the earlier fullscreen containing-block fix
-    stays in theme.py regardless, since fullscreen is still technically
-    reachable).
+    Also hosts the "Explainability method" selectbox, since this is the
+    one place its choice has a visible effect (which Grad-CAM overlays
+    exist to pick from below).
 
-    Also hosts the "Explainability method" selectbox -- it used to live in
-    the (now-removed) sidebar; this is the one place its choice actually
-    has a visible effect (which Grad-CAM overlays exist to pick from
-    below), so it's more discoverable here than buried in a settings
-    expander elsewhere on the page.
-
-    Deliberately called only once the FULL pipeline result is available
-    (see main flow below) rather than from inside on_stage -- some of
-    these images (Grad-CAM, the two overlays) don't exist yet mid-pipeline,
-    and threading "which images are ready so far" through a progressively
-    updating pills widget isn't worth the complexity for a comparison view
-    that's naturally a "look at everything together" step anyway, same
-    reasoning as why the Report Preview section only appears once
-    `result` is final.
+    Called only once the full pipeline result is available (not from
+    on_stage), since some of these images (Grad-CAM, the two overlays)
+    don't exist yet mid-pipeline.
     """
     st.subheader("Image Comparison")
 
@@ -401,18 +298,11 @@ def render_image_comparison(result: dict) -> None:
         "Preprocessed": result["preprocessing_preview"]["after"],
     }
     # Grad-CAM overlays come back at the model's fixed square input
-    # resolution (see explainability/gradcam.py's IMAGE_SIZE resize, done
-    # before inference), not the photo's own aspect ratio -- confirmed live
-    # (a 2056x2124 demo photo's overlay was a hard 224x224 square). Next to
-    # Original/Preprocessed/the vessel and optic-disc overlays (all of
-    # which keep the source aspect ratio), that mismatch is exactly why
-    # Grad-CAM tiles looked out of sync in this grid: same column width,
-    # different height, so rows never lined up. Stretching the square
-    # overlay back out to Original's own (height, width) is the correct
-    # undo of that resize -- the heatmap's pixel grid already maps 1:1
-    # onto the square-resized photo, so restoring the original aspect
-    # ratio realigns it with Original/Preprocessed instead of distorting
-    # it. Display-only; the model/CAM generation itself is untouched.
+    # resolution (see explainability/gradcam.py's IMAGE_SIZE resize), not
+    # the photo's own aspect ratio, unlike Original/Preprocessed/the vessel
+    # and optic-disc overlays -- stretch back to the original (height,
+    # width) so rows in this grid line up. Display-only; the model/CAM
+    # generation itself is untouched.
     _target_hw = (original.shape[1], original.shape[0])  # cv2.resize wants (width, height)
 
     def _match_original_aspect(overlay: np.ndarray) -> np.ndarray:
@@ -431,12 +321,9 @@ def render_image_comparison(result: dict) -> None:
 
     options = list(images)
     default_selection = options[:2]
-    # The Explainability method selectbox sits directly above "Compare
-    # views" now, not next to the "Image Comparison" heading above -- a
-    # design-review pass found it read as floating/ambiguously grouped up
-    # there (nothing visually tied it to the Grad-CAM options it actually
-    # controls). Sitting immediately beside the pills it affects should
-    # read as clearly connected instead.
+    # Explainability method sits directly beside the pills it controls,
+    # rather than up near the "Image Comparison" heading, so the
+    # relationship reads as clearly connected.
     caption_col, method_col = st.columns([3, 1], vertical_alignment="center")
     with caption_col:
         st.caption("Select two or more views to compare them side by side. Hover an image to magnify.")
@@ -450,16 +337,10 @@ def render_image_comparison(result: dict) -> None:
 
     for start in range(0, len(selected), _MAX_COMPARISON_IMAGES_PER_ROW):
         chunk = selected[start : start + _MAX_COMPARISON_IMAGES_PER_ROW]
-        # Always allocate a full _MAX_COMPARISON_IMAGES_PER_ROW columns, even
-        # when this row's chunk is smaller (the last row, whenever the
-        # selection count isn't a multiple of the row width) -- st.columns
-        # divides available width by however many columns you ask for, so
-        # asking for just len(chunk) let a half-empty last row's images
-        # stretch wider than a full row's (confirmed live: a lone image in
-        # a 1-column "row" rendered ~3x the size of images sharing a
-        # 3-column row). Leaving the remainder of a short row's columns
-        # empty keeps every image the same grid-cell size regardless of
-        # how many views are selected.
+        # Always allocate a full _MAX_COMPARISON_IMAGES_PER_ROW columns,
+        # even for a short last row -- st.columns divides available width
+        # by however many columns you ask for, so a shorter row would
+        # render its images wider than a full row's.
         columns = st.columns(_MAX_COMPARISON_IMAGES_PER_ROW)
         for column, name in zip(columns, chunk):
             with column:
@@ -467,7 +348,7 @@ def render_image_comparison(result: dict) -> None:
 
 
 # stage_name -> (render function, extractor from the finished result dict).
-# Single source of truth for both render paths below, and for on_stage's
+# Single source of truth for both render paths below and for on_stage's
 # dispatch -- the on_stage callback value is already shaped to match each
 # render function's positional args directly (see pipeline.run_pipeline's
 # docstring), so both paths call `fn(*args)` against the same functions.
@@ -485,9 +366,7 @@ _EXTRACT_BY_STAGE = {stage: extract for stage, _, extract in _SECTIONS}
 
 # Visual grouping only -- pipeline.py's STAGE_NAMES/on_stage order is
 # unchanged, this just says which stages share one dashboard row and how
-# many columns that row gets. The repetition fix lives here: Disease
-# Screening puts what used to be three full-width sections into one row of
-# three compact tiles.
+# many columns that row gets.
 _ROWS = [
     ("Overview", ["quality", "preprocessing"]),
     ("Disease Screening", ["detection", "glaucoma", "amd"]),
@@ -497,9 +376,8 @@ _ROWS = [
 
 def _create_stage_placeholders() -> dict:
     """One st.empty() per stage, arranged into the _ROWS grid, filled
-    immediately with a skeleton -- same "whole results area shows loading
-    shape at once" goal as before, just laid out densely instead of
-    stacked full-width.
+    immediately with a skeleton so the whole results area shows its
+    loading shape at once.
     """
     placeholders = {}
     for title, stages in _ROWS:
@@ -508,7 +386,7 @@ def _create_stage_placeholders() -> dict:
         for col, stage in zip(cols, stages):
             with col:
                 placeholders[stage] = st.empty()
-                with placeholders[stage].container(key=f"vdx-section-{stage}-skeleton"):
+                with placeholders[stage].container(key=f"fdx-section-{stage}-skeleton"):
                     render_skeleton(stage)
     return placeholders
 
@@ -523,17 +401,15 @@ def _render_all_sections(result: dict) -> None:
         cols = st.columns(len(stages))
         for col, stage in zip(cols, stages):
             with col:
-                with st.container(key=f"vdx-section-{stage}-content"):
+                with st.container(key=f"fdx-section-{stage}-content"):
                     _RENDER_BY_STAGE[stage](*_EXTRACT_BY_STAGE[stage](result))
 
 
-# A floating footer instead of an inline caption -- doesn't interrupt the
-# page's flow. Fixed + centered + bounded-width, same proven pattern as
-# the progress banner (see theme.py's comment on .vdx-progress-banner for
-# why -- an edge-to-edge fixed element silently fails to paint its text
-# in this environment).
+# Fixed + centered footer, not an inline caption, so it doesn't interrupt
+# the page's flow (see theme.py's .fdx-progress-banner comment for why
+# position: fixed, not sticky, is needed here).
 st.markdown(
-    '<div class="vdx-disclaimer-footer">AI-assisted retinal disease analysis pipeline '
+    '<div class="fdx-disclaimer-footer">AI-assisted retinal disease analysis pipeline '
     "— educational/portfolio demonstration, not a diagnostic device.</div>",
     unsafe_allow_html=True,
 )
@@ -561,21 +437,19 @@ def _resolve_image_source() -> tuple[str, np.ndarray | None]:
             if not effective_patient_id:
                 effective_patient_id = f"DEMO-{selected['id_code']}"
     else:
-        # The intake panel composes its own icon + heading + caption INSIDE
-        # the same dashed box as the uploader (see .st-key-vdx-dropzone-
-        # wrapper in theme.py, which strips the native dropzone's own
-        # border/background so this wrapper reads as the one dashed box,
-        # matching the reference mockup's single-composition dropzone
-        # instead of a custom heading sitting above a separately-bordered
-        # native widget). Streamlit's own instructional text is hidden by
-        # that same CSS since it would otherwise repeat this heading.
-        with st.container(key="vdx-dropzone-wrapper"):
+        # The intake panel composes its own icon/heading/caption inside the
+        # dropzone's dashed box (see .st-key-fdx-dropzone-wrapper in
+        # theme.py, which strips the native dropzone's own border/
+        # background) instead of a separately-bordered native widget.
+        # Streamlit's own instructional text is hidden by that same CSS
+        # since it would otherwise repeat this heading.
+        with st.container(key="fdx-dropzone-wrapper"):
             st.markdown(
                 '<div style="text-align: center;">'
-                '<span class="material-symbols-outlined" style="font-size: 2.25rem; color: var(--vdx-primary);">cloud_upload</span>'
-                '<p style="font-family: var(--vdx-font-display); font-weight: 700; '
+                '<span class="material-symbols-outlined" style="font-size: 2.25rem; color: var(--fdx-primary);">cloud_upload</span>'
+                '<p style="font-family: var(--fdx-font-display); font-weight: 700; '
                 'font-size: 1.05rem; margin: 0.5rem 0 0.15rem;">Drop a fundus photo here</p>'
-                '<p class="vdx-caption" style="margin-bottom: 0.75rem;">PNG, JPG, or JPEG</p>'
+                '<p class="fdx-caption" style="margin-bottom: 0.75rem;">PNG, JPG, or JPEG</p>'
                 "</div>",
                 unsafe_allow_html=True,
             )
@@ -589,37 +463,35 @@ def _resolve_image_source() -> tuple[str, np.ndarray | None]:
 
 
 def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
-    """The centered "Patient Intake & Signal Acquisition" glass panel --
-    the Clinical Liquid Glass reference mockup's one concrete screen,
-    reproduced directly (see this module's docstring). Shown only before
-    the user has both picked an image source AND clicked "Initialize
-    analysis" for the first time this session; after that, the same
-    session-state-keyed controls move into a collapsed "Change patient /
-    image" expander instead (see the call site below) so they stay
-    reachable without this panel taking over the page every time settings
-    change.
+    """The centered "Patient Intake & Signal Acquisition" glass panel,
+    shown only before the user has both picked an image source AND clicked
+    "Initialize analysis" for the first time this session; after that, the
+    same session-state-keyed controls move into a collapsed "Change
+    patient / image" expander instead (see the call site below) so they
+    stay reachable without this panel taking over the page every time
+    settings change.
 
     Returns (effective_patient_id, image, initialize_clicked).
     """
-    with st.container(key="vdx-intake-panel"):
+    with st.container(key="fdx-intake-panel"):
         left_col, right_col = st.columns([5, 7], gap="large")
 
         with left_col:
             st.markdown(
-                '<span class="vdx-intake-eyebrow">System entry portal</span>'
+                '<span class="fdx-intake-eyebrow">System entry portal</span>'
                 '<h2 style="margin-top: 0.4rem;">Patient Intake &amp; Signal Acquisition</h2>'
-                '<p class="vdx-intake-description">Upload a fundus photo or enter patient '
+                '<p class="fdx-intake-description">Upload a fundus photo or enter patient '
                 "details to run the automated screening pipeline (quality check, disease "
                 "detection, biomarkers, and a recommendation summary).</p>",
                 unsafe_allow_html=True,
             )
             st.markdown('<div style="height: 0.5rem"></div>', unsafe_allow_html=True)
-            with st.container(key="vdx-intake-toggle-row"):
+            with st.container(key="fdx-intake-toggle-row"):
                 label_col, toggle_col = st.columns([4, 1], vertical_alignment="center")
                 with label_col:
                     st.markdown(
-                        '<div class="vdx-intake-toggle-label">Demo mode</div>'
-                        '<div class="vdx-intake-toggle-sublabel">Use a local sample image</div>',
+                        '<div class="fdx-intake-toggle-label">Demo mode</div>'
+                        '<div class="fdx-intake-toggle-sublabel">Use a local sample image</div>',
                         unsafe_allow_html=True,
                     )
                 with toggle_col:
@@ -632,7 +504,7 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
                     )
 
         with right_col:
-            st.markdown('<span class="vdx-field-label">Patient ID / reference</span>', unsafe_allow_html=True)
+            st.markdown('<span class="fdx-field-label">Patient ID / reference</span>', unsafe_allow_html=True)
             st.text_input(
                 "Patient ID / reference",
                 value="",
@@ -653,14 +525,12 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
             )
 
         st.divider()
-        # The reference mockup pairs this with a right-aligned "Lat: 40ms /
-        # v4.2.1-stable" readout -- fabricated telemetry with no real
-        # backing value here, so it's dropped rather than faked; this
-        # status dot is left as the one genuinely meaningful signal (the
+        # No fabricated telemetry (e.g. fake latency/version numbers) --
+        # this status dot is the one genuinely meaningful signal here (the
         # page loaded and its components registered).
         st.markdown(
-            '<div class="vdx-header-status">'
-            '<span class="vdx-status-dot"></span>'
+            '<div class="fdx-header-status">'
+            '<span class="fdx-status-dot"></span>'
             "<span>Core engine ready</span>"
             "</div>",
             unsafe_allow_html=True,
@@ -669,21 +539,20 @@ def render_intake_screen() -> tuple[str, np.ndarray | None, bool]:
     return effective_patient_id, image, initialize_clicked
 
 
-_started = st.session_state.get("_vdx_started", False)
+_started = st.session_state.get("_fdx_started", False)
 
 if not _started:
     effective_patient_id, image, initialize_clicked = render_intake_screen()
     if image is not None and initialize_clicked:
-        st.session_state["_vdx_started"] = True
+        st.session_state["_fdx_started"] = True
         st.rerun()
     st.stop()
 
 st.header("Results")
 
-# Same session-state-keyed controls render_intake_screen() uses (see this
-# module's docstring for why there's no sidebar to put them in instead),
-# collapsed by default so they're reachable without bringing back the
-# full-page intake panel.
+# Same session-state-keyed controls render_intake_screen() uses, collapsed
+# by default so they're reachable without bringing back the full-page
+# intake panel.
 with st.expander("Change patient / image", icon=":material/edit:"):
     st.text_input("Patient ID / reference", value="", placeholder="e.g. DEMO-001", key="patient_id")
     st.toggle(
@@ -698,25 +567,20 @@ if image is None:
     st.info('Upload a fundus photo or turn on demo mode under "Change patient / image" above to get started.')
     st.stop()
 
-# Explainability method also used to live in the sidebar -- read here
-# (session_state already holds its current value from the previous run,
-# same pattern Streamlit widgets always rely on) since the pipeline needs
-# it before the actual selectbox widget renders further down, next to the
-# Image Comparison viewer its choice actually affects.
+# Read here (session_state already holds its current value from the
+# previous run) since the pipeline needs it before the actual selectbox
+# further down, next to the Image Comparison viewer its choice affects,
+# renders.
 cam_method = st.session_state.get("cam_method", next(iter(CAM_METHODS)))
 
 cache_key = (hashlib.md5(image.tobytes()).hexdigest(), effective_patient_id, cam_method)
-is_new_computation = st.session_state.get("_vdx_cache_key") != cache_key
+is_new_computation = st.session_state.get("_fdx_cache_key") != cache_key
 
 if is_new_computation:
-    # The banner is created FIRST, immediately after the "Results" header
-    # and before any section placeholder -- position: sticky keeps it
-    # pinned to the viewport top once scrolled past, but only from
-    # wherever it sits in DOM order onward. Creating it after the section
-    # placeholders (tried first, caught live) put the grid above it, so
-    # scrolling past the header still left the banner off-screen below
-    # real content -- the exact bug this page exists to fix, just moved.
-    # It has to be the first thing in the results flow.
+    # Created first, before any section placeholder: position: fixed keeps
+    # it pinned to the viewport regardless of scroll, but creating it after
+    # the placeholders instead put the grid above it in DOM order, leaving
+    # the banner off-screen below real content once scrolled past the header.
     banner = ProgressBanner()
 
     placeholders = _create_stage_placeholders()
@@ -724,7 +588,7 @@ if is_new_computation:
     def on_stage(stage_name, value):
         banner.advance(stage_name)
         args = value if isinstance(value, tuple) else (value,)
-        with placeholders[stage_name].container(key=f"vdx-section-{stage_name}-content"):
+        with placeholders[stage_name].container(key=f"fdx-section-{stage_name}-content"):
             _RENDER_BY_STAGE[stage_name](*args)
 
     try:
@@ -737,25 +601,23 @@ if is_new_computation:
         st.stop()
 
     banner.finish()
-    st.session_state["_vdx_result"] = result
-    st.session_state["_vdx_cache_key"] = cache_key
+    st.session_state["_fdx_result"] = result
+    st.session_state["_fdx_cache_key"] = cache_key
 else:
-    result = st.session_state["_vdx_result"]
+    result = st.session_state["_fdx_result"]
     _render_all_sections(result)
 
 render_image_comparison(result)
 
 st.divider()
 
-# The Recommendation text is report/content.py's one synthesized, cross-
-# field summary (severity phrasing, the CDR-vs-classifier-disagreement
-# note when present, the disclaimer) -- not reproducible from the raw
-# pipeline dicts without duplicating that logic here, so it's still
-# sourced from build_report_content() exactly like the PDF is. Everything
-# else that Section list carries (quality metrics, before/after images,
-# per-detection text/tables/images, biomarker metrics/images) is NOT
-# re-rendered below -- see this module's docstring for why: it was a full
-# second copy of content already shown above.
+# The Recommendation text is report/content.py's one synthesized,
+# cross-field summary (severity phrasing, the CDR-vs-classifier-
+# disagreement note when present, the disclaimer) -- sourced from
+# build_report_content() exactly like the PDF is, so the two can't drift
+# apart. Nothing else from its Section list is re-rendered below since
+# it's all already shown above (quality metrics, before/after images,
+# per-detection text/tables/images, biomarker metrics/images).
 content = build_report_content(result)
 recommendation = next(s for s in content.sections if s.title == "Recommendation")
 render_recommendation_card(recommendation.body)
@@ -764,7 +626,7 @@ pdf_bytes = generate_pdf(content)
 st.download_button(
     "Download PDF report",
     data=pdf_bytes,
-    file_name=f"visiondx_report_{_safe_filename(content.patient_id)}.pdf",
+    file_name=f"fundusight_report_{_safe_filename(content.patient_id)}.pdf",
     mime="application/pdf",
 )
 st.caption(
@@ -772,8 +634,6 @@ st.caption(
     "probability breakdowns, biomarkers, recommendation) in a print-formatted "
     "layout, or use your browser's Print (Ctrl/Cmd+P) on this page."
 )
-# Reserves room at the very bottom of the page so the fixed disclaimer
-# footer doesn't sit on top of this last caption when scrolled all the way
-# down -- the footer floats over whatever's currently at the bottom of the
-# viewport, this just keeps that from being real content.
-st.markdown('<div class="vdx-footer-spacer"></div>', unsafe_allow_html=True)
+# Reserves space so the fixed disclaimer footer doesn't overlap the last
+# real content when scrolled all the way down.
+st.markdown('<div class="fdx-footer-spacer"></div>', unsafe_allow_html=True)

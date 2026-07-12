@@ -38,14 +38,14 @@ _MAX_IMAGE_HEIGHT = 9 * cm
 def _styles() -> dict:
     base = getSampleStyleSheet()
     return {
-        "title": ParagraphStyle("VDxTitle", parent=base["Title"], textColor=_TEXT_COLOR, fontSize=22, spaceAfter=4),
-        "meta": ParagraphStyle("VDxMeta", parent=base["Normal"], textColor=_MUTED_COLOR, fontSize=9, spaceAfter=4),
+        "title": ParagraphStyle("FdxTitle", parent=base["Title"], textColor=_TEXT_COLOR, fontSize=22, spaceAfter=4),
+        "meta": ParagraphStyle("FdxMeta", parent=base["Normal"], textColor=_MUTED_COLOR, fontSize=9, spaceAfter=4),
         "heading": ParagraphStyle(
-            "VDxHeading", parent=base["Heading2"], textColor=_TEXT_COLOR, fontSize=13, spaceBefore=20, spaceAfter=8
+            "FdxHeading", parent=base["Heading2"], textColor=_TEXT_COLOR, fontSize=13, spaceBefore=20, spaceAfter=8
         ),
-        "body": ParagraphStyle("VDxBody", parent=base["Normal"], textColor=_TEXT_COLOR, fontSize=10.5, leading=15),
+        "body": ParagraphStyle("FdxBody", parent=base["Normal"], textColor=_TEXT_COLOR, fontSize=10.5, leading=15),
         "caption": ParagraphStyle(
-            "VDxCaption", parent=base["Normal"], textColor=_MUTED_COLOR, fontSize=8.5, spaceBefore=4, alignment=1
+            "FdxCaption", parent=base["Normal"], textColor=_MUTED_COLOR, fontSize=8.5, spaceBefore=4, alignment=1
         ),
     }
 
