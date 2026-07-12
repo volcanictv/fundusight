@@ -68,7 +68,19 @@ checkpoint (see ROADMAP.md's Phase 6 note) needs no changes on this page.
 
 import hashlib
 import html
+import os
 import re
+import sys
+
+# Streamlit Community Cloud runs the `streamlit` executable directly rather
+# than `python -m streamlit`, so unlike the local dev invocation (see the
+# docstring above), the repo root never lands on sys.path automatically --
+# only src/app (this file's own directory) does, via Streamlit's own
+# bootstrap. Every `from src...` import below needs the repo root on
+# sys.path, so add it explicitly before they run.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import cv2
 import numpy as np
