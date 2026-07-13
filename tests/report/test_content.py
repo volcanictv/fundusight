@@ -12,6 +12,8 @@ def _pipeline_result(
     amd_cam_overlay=None,
     cdr=0.3,
     disc_found=True,
+    disc_confident=True,
+    disc_localization_warnings=None,
 ):
     size = 50
     working_image = np.zeros((size, size, 3), dtype=np.uint8)
@@ -50,6 +52,8 @@ def _pipeline_result(
             "cup_diameter_px": 12,
             "macula_location": (5, 5) if disc_found else None,
             "disc_found": disc_found,
+            "disc_confident": disc_confident,
+            "disc_localization_warnings": disc_localization_warnings or [],
             "macula_found": disc_found,
         },
         "working_image": working_image,
@@ -152,6 +156,49 @@ def test_recommendation_no_disagreement_note_when_signals_agree():
 
     rec = next(s for s in content.sections if s.title == "Recommendation")
     assert "different directions" not in rec.body
+
+
+def test_recommendation_warns_when_disc_localization_is_low_confidence():
+    content = build_report_content(
+        _pipeline_result(disc_confident=False, disc_localization_warnings=["not disc-shaped (circularity 0.05 < 0.19)"])
+    )
+    rec = next(s for s in content.sections if s.title == "Recommendation")
+
+    assert "could not be localized with confidence" in rec.body
+    assert "not disc-shaped" in rec.body
+
+
+def test_low_confidence_localization_suppresses_elevated_cdr_observation():
+    # The whole point of the plausibility check: an "elevated" CDR measured
+    # off a bright lesion instead of the disc is an artifact, not a finding.
+    # It must not be stated as an observation just because the number is high.
+    content = build_report_content(_pipeline_result(cdr=0.65, disc_confident=False))
+    rec = next(s for s in content.sections if s.title == "Recommendation")
+
+    assert "higher end" not in rec.body
+    assert "should not be relied on" in rec.body
+
+
+def test_low_confidence_localization_suppresses_glaucoma_disagreement_note():
+    # A disagreement between the classifier and a CDR already known to be
+    # untrustworthy isn't a real disagreement -- it's the bad crop talking.
+    glaucoma = _binary_detection(0, "No Glaucoma Signs")
+    content = build_report_content(_pipeline_result(glaucoma=glaucoma, cdr=0.65, disc_confident=False))
+
+    rec = next(s for s in content.sections if s.title == "Recommendation")
+    assert "different directions" not in rec.body
+
+
+def test_optic_disc_section_reports_localization_confidence():
+    confident = build_report_content(_pipeline_result(disc_confident=True))
+    low = build_report_content(_pipeline_result(disc_confident=False))
+
+    def _rows(content):
+        section = next(s for s in content.sections if s.title == "Optic Disc / Cup / Macula")
+        return dict(section.body["rows"])
+
+    assert _rows(confident)["Localization confidence"] == "OK"
+    assert "Low" in _rows(low)["Localization confidence"]
 
 
 def test_recommendation_always_includes_disclaimer():

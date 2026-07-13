@@ -88,6 +88,37 @@ A two-stage hybrid pipeline, same shape as Phase 5's classical+learned
 split: a cheap classical stage handles localization/cropping, a trained
 model handles the hard segmentation decision within that crop.
 
+> **Localization hardening (2026-07-14).** Stage 6.1's brightness search was
+> failing on exactly the images that matter (pathology), so two things were
+> added. See DEEP_DIVE.md for both write-ups.
+>
+> 1. **Vascular convergence prior** (`optic_disc.compute_vascular_convergence`)
+>    — the disc is where the retinal vessels converge, which exudates,
+>    reflections and hemorrhages are not. Multiplying the brightness map by a
+>    directional vessel-voting accumulator took localization accuracy
+>    **85.9% → 94.1%** on ADAM's 270 ground-truth discs (**83.3% → 91.7%** on
+>    the pathological AMD subset), wrong crops 38 → 16, silent failures still 0.
+>    Usable (correct *and* confident) CDRs: **68.5% → 73.7%**.
+>    **This invalidated the plausibility thresholds** — they are a property of
+>    the localizer, not of discs — and re-sweeping moved circularity 0.19 → 0.10.
+>    Any future change to how the candidate is picked requires re-sweeping them.
+> 2. **Stage 6.0, a coarse full-frame locator** (`disc_locator_model.py`) — a
+>    small CNN that regresses the disc bbox from a downscaled WHOLE frame, used
+>    to arbitrate when Stage 6.1 reports low confidence, with a safe in-retina
+>    fallback ROI when both fail (`optic_disc_infer.locate_disc_arbitrated`).
+>    Deliberately a **separate model**, not a multi-task head on the Stage 6.2
+>    U-Net: that U-Net only ever sees an ONH crop Stage 6.1 already produced, so
+>    a head on it could only learn "where is the disc inside a crop that already
+>    contains the disc" — and on the failing images the crop does not contain the
+>    disc at all. Running such a head on a full frame would be out-of-distribution
+>    inference, the same mistake the full-image glaucoma classifier made.
+>    Its position head is a **soft-argmax over a heatmap, not GAP → MLP**: GAP is
+>    translation-invariant by construction and cannot report *where* a feature
+>    fired. The GAP version was built first and failed exactly that way (val hit
+>    rate collapsed 0.31 → 0.011 while train loss fell — it regressed to
+>    predicting the mean disc position). Use GAP for "what/how much", never for
+>    "where".
+
 - Stage 6.1 (classical): locate the optic nerve head (ONH) as the center
   of the brightest disc-sized *compact* patch within the field-of-view
   mask (a windowed-average-brightness peak, not a global brightness
@@ -210,6 +241,44 @@ fix; a real fix would need either eye-laterality metadata (not available in
 REFUGE2 or ADAM) or a learned macula localizer, which no available dataset
 currently has the labels to train.
 
+**Stage 6.1's classical localizer can mistake a hemorrhage for the disc —
+found, quantified, and now guarded (2026-07-13).** The brightness search
+answers "where is the brightest disc-sized patch", which is strictly weaker
+than "where is the optic disc": a large hemorrhage or dense exudate cluster
+can win it outright, and nothing downstream noticed — the wrong crop fed
+Stage 6.2, which segmented a plausible "disc"/"cup" out of it, and Stage 6.3
+reported an ordinary-looking CDR measured off the wrong anatomy. Validated
+against ADAM's 400 ground-truth `Disc_Masks` (130 are blank/unannotated and
+excluded, leaving 270 real ones) by `scripts/evaluate_disc_localization.py`:
+the predicted center lands **outside the true disc on 38/270 images (14%)**,
+and pathological eyes fail more (AMD 83.3% correct vs Non-AMD 87.1%).
+
+Fix: `assess_disc_plausibility()` in `src/segmentation/optic_disc.py` now
+checks the candidate's *shape* rather than its brightness — circularity and
+size, both **calibrated against those 270 masks, not guessed**. Result: **38/38
+(100%) of wrong crops flagged, 0 silent failures** (previously all 38 were
+silent), at a deliberate cost of 47/232 (20.3%) correct crops needlessly
+flagged — a false alarm only annotates the CDR as low-confidence, while a miss
+silently reports a ratio measured off a hemorrhage. Three calibration results
+were counterintuitive enough to be worth knowing (see DEEP_DIVE.md): a
+correctly-located disc scores only ~0.34 circularity (not ~0.9 — the blob is a
+raw Otsu threshold with vessels cutting through it, and a textbook 0.65
+threshold flagged 95.7% of *correct* crops); wrong crops are systematically
+**larger** than real discs, so the size check earns its keep as a max, not a
+min; and solidity, though individually discriminative, is entirely redundant
+and was deliberately **not** shipped as a gate.
+
+`disc_confident` / `disc_localization_warnings` now flow through
+`compute_optic_biomarkers{,_hybrid}()` into `report/content.py` and the app.
+When localization is rejected the CDR is labelled unreliable **and withheld
+from the elevated-CDR observation** (an "elevated" CDR derived from a
+hemorrhage is an artifact, not a finding), and the glaucoma-vs-CDR
+disagreement note is suppressed too. Verified end-to-end on a real image (ADAM
+`A0001`): the localizer grabs a lesion, the check fires
+(`circularity 0.05 < 0.19`, `diameter 0.153 of image width`), and a CDR of
+0.536 that would previously have been reported as an elevated-CDR finding is
+now flagged instead.
+
 **Done when:** disc mask, cup mask, and macula location are overlaid on a
 sample image, a vertical cup-disc ratio is printed alongside them, the
 cup-within-disc structural check passes (verified by a test), the
@@ -219,7 +288,8 @@ disc/cup segmentation model. **Status: done** — see retrain results above.
 The macula/fovea heuristic itself is now known to be unreliable outside
 REFUGE2-like framing (see validation above) — worth flagging in the app/
 report if macula location is ever surfaced as more than an approximate
-overlay.
+overlay. Stage 6.1's localizer is now guarded by geometric plausibility
+checks (see above), so a bad crop can no longer silently produce a CDR.
 
 ## Phase 7 — Multi-disease + Multi-dataset (weeks 9-11)
 
@@ -381,6 +451,143 @@ and the degradation pattern (ranking/ordinal signal surviving better than
 hard classification accuracy) is itself informative about what a fundus-photo
 domain shift (different camera hardware, population, lighting) does to a
 CNN classifier.
+
+---
+
+### Post-review model-failure fixes (2026-07-13)
+
+Domain-expert review of the trained models surfaced four failure modes. All
+four were investigated against real ground truth; two produced fixes, one is
+documented as a known limitation, one is blocked on missing data. Full
+write-ups in DEEP_DIVE.md.
+
+**1. Glaucoma classifier was attending to edge artifacts and hemorrhages, not
+the disc — FIXED by cropping to the ONH.** Reproduced first (Grad-CAM on the
+old checkpoint puts its heat on the frame edge/vignette on `T0041` and on a
+bright lesion cluster on `T0022`, disc cold in both). Glaucoma is diagnosed
+from the optic nerve head, but the classifier saw a whole fundus photo where
+the disc is a few percent of pixels — a ~25px blob once squashed to 224x224.
+`src/detection/onh_crop.py` now crops to the ONH (3 disc diameters wide, so
+peripapillary RNFL defects and disc hemorrhages just outside the rim survive)
+by reusing Phase 6's Stage 6.1 localizer. It is the **single shared crop
+definition**, imported by both `glaucoma_dataset.py` (training) and
+`glaucoma_infer.py` (inference) so the two cannot drift; `report/pipeline.py`
+applies it once and feeds it to both the prediction and Grad-CAM, so the
+heatmap explains the array the prediction came from. Retrained via
+`.venv\Scripts\python.exe src\detection\glaucoma_train.py --epochs 30`
+(`--full-image` reproduces the old baseline). The pre-fix checkpoint is kept at
+`checkpoints/glaucoma_efficientnet_b0.fullimage_baseline.pth` for comparison,
+not used by inference.
+
+**No regression — but only when compared correctly:**
+
+```
+                  baseline (full image)   ONH crop
+accuracy                0.7400             0.8533
+auc                     0.8308             0.8110
+sensitivity             0.7778             0.6111
+specificity             0.7348             0.8864
+```
+
+The 17-point sensitivity "collapse" is a **threshold artifact, not a capability
+loss**. The ONH model outputs systematically lower probabilities (mean 0.295 vs
+0.393), so a fixed argmax(0.5) parks it at a more conservative operating point.
+At **matched specificity** the two are identical at the baseline's own point
+(both `sens=0.778 @ spec>=0.735`) and the ONH model is *better* at high
+specificity (`0.611` vs `0.556 @ spec>=0.886`). AUC is statistically
+indistinguishable (bootstrap CIs `[0.722, 0.926]` vs `[0.688, 0.919]`) — the
+test split has only 18 positives, where three cases move sensitivity 17 points.
+Lower the threshold if the old sensitivity is wanted.
+
+**On attention, the honest result:** the CAM "enrichment on the disc" metric is
+*not* trustworthy here — Grad-CAM says the ONH model puts 1.45x MORE attention
+on the disc, LayerCAM says 0.65x LESS, disagreeing on magnitude *and direction*
+(EfficientNet-B0's final CAM grid is 7x7, one cell = 32x32 input px, too coarse
+to resolve the disc). No numeric claim is made. What holds regardless is
+structural: after cropping, edge artifacts and distant hemorrhages are outside
+the model's input and **cannot** be attended to. Attention now lands on
+rim/peripapillary anatomy rather than the frame edge — a partial fix, not a
+solved problem. Run `scripts\compare_glaucoma_attention.py`.
+
+**2. Classical disc localizer accepting hemorrhages as discs — FIXED.** See
+Phase 6 above (geometric plausibility checks; 38/38 bad crops now caught, 0
+silent failures).
+
+**3. DR classifier's central spatial bias — CONFIRMED REAL AND LEARNED;
+lesion-mask confirmation BLOCKED.** `scripts/investigate_dr_spatial_bias.py`.
+Preprocessing was ruled out first (cheapest explanation, one-line fix if true):
+the eval transform chain has **no crop op** — `Resize((224,224))` squashes the
+whole frame in — `enhance.preprocess()` preserves frame size, and it isn't in
+the classifier's path anyway (`pipeline.py` passes the **raw** image to the
+classifiers; `preprocess()` output is display-only). So the model does see the
+periphery. The bias is then measured against a **randomly-initialized control**,
+since a CNN + Grad-CAM has a center bias built in (zero-padding, coarse grid,
+circular FOV in a square frame) that would make even an untrained model look
+centrally biased:
+
+```
+bin (center -> edge)   0.00-0.17  0.17-0.33  0.33-0.50  0.50-0.67  0.67-0.83  0.83-1.00
+trained                  2.52       2.19       1.54       0.85       0.40       0.24
+untrained (null)         0.82       1.05       0.74       0.63       1.24       1.68
+difference              +1.70      +1.14      +0.81      +0.22      -0.84      -1.44
+```
+
+The untrained net actually attends **more at the edge** — so training didn't
+just fail to overcome an architectural center bias, it *reversed an edge bias
+into a strong central one*. Attention falls off 10x from center to periphery.
+**Blocked:** the planned lesion-location correlation needs IDRiD's lesion
+segmentation masks, which are **not in this repo** — only IDRiD's "B. Disease
+Grading" subset (455 JPEGs + severity CSV, no pixel labels) was downloaded. The
+masks live in IDRiD's separate **"A. Segmentation"** download (81 images).
+Reported as blocked rather than substituting another dataset and calling it the
+same evidence.
+
+**4. AMD classifier ignores the macula — CONFIRMED (causally), NOT FIXED
+(deliberately).** `scripts/evaluate_amd_attention.py`, measured against ADAM's
+real fovea ground truth (`Fovea_location.xlsx`), *not* the unreliable
+`locate_macula_classical()`. Grad-CAM is *misleading* here: it suggests the
+model looks hard at the macula (3.49x enrichment on AMD images, and harder when
+more confident), and LayerCAM disagrees in sign. The **causal occlusion test**
+settles it — inpaint the macula away (inpainting, not blacking out: a black disc
+costs the model ~0.475 confidence *regardless of where it is put*, so a
+black-out test measures reaction to a black disc, not dependence on anatomy) and
+compare against a matched control region:
+
+```
+true-AMD, n=84 (mean AMD probability)
+  unmodified                 0.923
+  macula inpainted away      0.879   (drop +0.043)
+  control region inpainted   0.899   (drop +0.024)
+  STILL predicted AMD with the macula removed: 77/84 (91.7%)
+  Wilcoxon macula-drop vs control-drop: p=0.979  -> no macula-specific dependence
+```
+
+Remove the site that *defines* the disease and the model still calls it AMD
+91.7% of the time, no worse than removing a random patch of retina. **Not fixed
+on purpose:** the obvious fix (crop to the macula) depends on
+`locate_macula_classical()`, already known unreliable (57% correct on
+eye-laterality) — stacking a real fix on a broken localizer would just move the
+error. What the model *is* using is unidentified; ADAM ships no lesion masks, so
+"not the macula" is as far as the available data goes.
+
+**Hemorrhage-masking as a lower-risk mitigation — investigated, NOT
+recommended.** Three reasons, in order of severity: (a) **nothing to mask
+with** — ADAM has no lesion annotations at all, and the nearest source (IDRiD
+"A. Segmentation") is undownloaded *and* a diabetic-retinopathy population whose
+hemorrhages differ from AMD's submacular ones; a segmenter trained there and
+applied to ADAM crosses the exact domain gap this repo measured at 83.9% ->
+54.3%. (b) **Masking leaks the label, and the occlusion experiment proves it
+empirically** — a masked region shifts this model's output by ~0.475 regardless
+of content, so if masks appear only where hemorrhages are (and hemorrhages
+correlate with AMD), the model learns "black blob => AMD": a *worse* shortcut
+than the one being removed. Avoiding that needs inpainting **plus** matched
+decoy masks on the negatives — substantial, delicate work, not a cheap
+mitigation. (c) **It may delete real signal** — submacular hemorrhage is a
+legitimate wet-AMD finding, not a spurious correlate. A real fix needs either a
+trustworthy fovea localizer or lesion-level labels for ADAM; until then this is
+a documented limitation, not a queued fix.
+
+---
 
 **Stretch goal reminder (not a Phase 7 blocker):** later, add RETFound
 (ViT-Large, MAE-pretrained on retinal images) as a comparison arm against

@@ -17,7 +17,24 @@ import os
 import requests
 
 DEFAULT_REPO = "volcanictv/fundusight"
-DEFAULT_TAG = "v1.0.0"
+# v1.2.0 (2026-07-14) ships the localization-hardening work, and the tag bump is
+# NOT cosmetic -- it must not be reverted independently of the code, for TWO
+# reasons now:
+#
+#   1. The glaucoma checkpoint classifies an optic-nerve-head CROP (v1.0.0's
+#      classified a full fundus photo). Pairing either one with the other's
+#      inference code feeds the model an image of a kind it never trained on --
+#      a silent train/inference mismatch that yields confident, meaningless
+#      probabilities rather than an error. See src/detection/onh_crop.py.
+#   2. The glaucoma checkpoint was RETRAINED again for v1.2.0, because adding
+#      the vascular convergence prior changed where locate_disc_classical()
+#      crops -- 100% of ONH crops moved. v1.1.0's glaucoma weights are trained
+#      on crops the current code no longer produces. That is the same silent
+#      mismatch as (1), just one level subtler: the crops still LOOK like ONH
+#      crops, they are simply not the ones the model learned on.
+#
+# Weights and code ship together, always.
+DEFAULT_TAG = "v1.2.0"
 
 # Matches src/detection/infer.py, glaucoma_infer.py, amd_infer.py, and
 # src/segmentation/vessel_infer.py, optic_disc_infer.py's DEFAULT_WEIGHTS_PATH
@@ -30,6 +47,12 @@ CHECKPOINT_FILES = [
     "amd_efficientnet_b0.pth",
     "vessel_unet.pth",
     "optic_disc_unet.pth",
+    # Stage 6.0's coarse full-frame disc locator (2026-07-14). Optional at
+    # runtime -- optic_disc_infer.compute_optic_biomarkers_auto() falls back to
+    # classical-only localization if it is missing -- but it is listed here so a
+    # deployed instance actually GETS it. Without it the app silently runs the
+    # weaker localizer and loses the ~10 rescued localizations per 270 images.
+    "disc_locator.pth",
 ]
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

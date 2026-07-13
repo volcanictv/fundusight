@@ -37,7 +37,15 @@ from tqdm import tqdm
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
 from src.detection.dataset import build_transforms
-from src.detection.glaucoma_dataset import GlaucomaDataset, build_pairs, compute_class_weights, domain_counts, split_pairs
+from src.detection.glaucoma_dataset import (
+    ONH_CROP_CACHE_DIRNAME,
+    GlaucomaDataset,
+    build_onh_crop_cache,
+    build_pairs,
+    compute_class_weights,
+    domain_counts,
+    split_pairs,
+)
 from src.detection.model import build_model
 
 
@@ -50,6 +58,17 @@ def parse_args():
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default=os.path.join(PROJECT_ROOT, "checkpoints", "glaucoma_efficientnet_b0.pth"))
+    # ONH cropping is the default because it is the fix (see
+    # src/detection/onh_crop.py) -- the full-image model it replaces was
+    # attending to hemorrhages and edge artifacts instead of the disc.
+    # --full-image reproduces that original baseline, which is what the
+    # before/after comparison in scripts/compare_glaucoma_attention.py needs;
+    # it is kept for that comparison, not as a supported training mode.
+    parser.add_argument(
+        "--full-image",
+        action="store_true",
+        help="Train on full fundus photos instead of ONH crops (reproduces the pre-fix baseline).",
+    )
     return parser.parse_args()
 
 
@@ -124,9 +143,21 @@ def main():
     for name, split in (("train", train_pairs), ("val", valid_pairs), ("test", test_pairs)):
         print(f"  {name} domain coverage: {domain_counts(split)}")
 
-    train_ds = GlaucomaDataset(train_pairs, transform=build_transforms(train=True))
-    valid_ds = GlaucomaDataset(valid_pairs, transform=build_transforms(train=False))
-    test_ds = GlaucomaDataset(test_pairs, transform=build_transforms(train=False))
+    onh_crop_root = None
+    if not args.full_image:
+        onh_crop_root = os.path.join(args.refuge_root, ONH_CROP_CACHE_DIRNAME)
+        print(f"\nPrecomputing ONH crops into {onh_crop_root} (cached; skipped if already present)...")
+        stats = build_onh_crop_cache(pairs, onh_crop_root)
+        print(
+            f"  {stats['total']} crops available ({stats['written']} newly written). "
+            f"Stage 6.1 reported a geometrically plausible disc for {stats['confident']} of the newly written ones."
+        )
+    else:
+        print("\n--full-image: training on FULL fundus photos (pre-fix baseline, not the shipped configuration).")
+
+    train_ds = GlaucomaDataset(train_pairs, transform=build_transforms(train=True), onh_crop_root=onh_crop_root)
+    valid_ds = GlaucomaDataset(valid_pairs, transform=build_transforms(train=False), onh_crop_root=onh_crop_root)
+    test_ds = GlaucomaDataset(test_pairs, transform=build_transforms(train=False), onh_crop_root=onh_crop_root)
 
     # persistent_workers for train/val only, released (see `del` below)
     # before spawning test's non-persistent pool -- same Windows paging-file

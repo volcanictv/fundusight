@@ -34,6 +34,7 @@ change (see ROADMAP.md).
 """
 
 import glob
+import hashlib
 import os
 
 import cv2
@@ -42,6 +43,7 @@ import torch
 from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 
+from src.segmentation import vessels
 from src.segmentation.optic_disc import DISC_ROI_WIDTH, crop_disc_roi, extract_color_features
 
 _MASK_CUP_VALUE = 0
@@ -121,6 +123,73 @@ def split_pooled_pairs(
 
     strip_source = lambda pairs: [(img, mask) for img, mask, _source in pairs]
     return strip_source(train), strip_source(valid), strip_source(test)
+
+
+WORKING_CACHE_DIRNAME = "optic_disc_working_cache"
+
+
+def _working_cache_paths(cache_root: str, image_path: str) -> tuple[str, str]:
+    """Cache filenames for one pair, keyed by a hash of the SOURCE IMAGE PATH.
+
+    A hash rather than the bare filename because REFUGE2 and RIGA both reuse
+    stems across folders (`image1-1.tif` exists in several RIGA subsets, and
+    REFUGE2 repeats names across train/val/test) -- keying on the basename would
+    silently collide and train the model on another image's mask.
+    """
+    key = hashlib.sha1(os.path.abspath(image_path).encode("utf-8")).hexdigest()[:16]
+    return (
+        os.path.join(cache_root, f"{key}_img.png"),
+        os.path.join(cache_root, f"{key}_msk.png"),
+    )
+
+
+def build_working_cache(pairs: list[tuple[str, str]], cache_root: str) -> dict:
+    """Pre-resize every (image, mask) pair to VESSEL_WORKING_WIDTH and cache it.
+
+    This is purely an I/O optimisation, and it is what makes pooled REFUGE2+RIGA
+    training possible at all on this machine. Decoding a native RIGA TIFF
+    (2240x1488) costs ~130 ms per sample; the cached working-resolution PNG costs
+    ~15 ms. That collapses the data pipeline from the bottleneck into a rounding
+    error, which in turn means training no longer needs DataLoader worker
+    processes -- and those workers, each holding full-resolution frames, were
+    silently killing the run under CUDA on Windows (no traceback, process simply
+    vanishes; the same paging-file exhaustion this module's sibling scripts warn
+    about).
+
+    Crucially this does NOT bake in the crop: the resized FULL frame is cached,
+    and the ROI is still cropped (with jitter) at __getitem__ time. Caching the
+    crop itself would freeze the jitter augmentation, which exists to make the
+    model robust to Stage 6.1's imperfect localization.
+
+    PNG, not JPEG -- a lossy re-encode would add compression artifacts to the
+    exact cup/rim pallor boundary the model is being asked to resolve. Idempotent:
+    existing entries are skipped, so an interrupted run resumes.
+    """
+    os.makedirs(cache_root, exist_ok=True)
+    written = skipped = 0
+
+    for image_path, mask_path in pairs:
+        img_out, msk_out = _working_cache_paths(cache_root, image_path)
+        if os.path.exists(img_out) and os.path.exists(msk_out):
+            skipped += 1
+            continue
+
+        image = cv2.imread(image_path, cv2.IMREAD_COLOR)
+        mask_raw = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
+        if image is None or mask_raw is None:
+            raise FileNotFoundError(f"Could not read {image_path} / {mask_path}")
+        if mask_raw.ndim == 3:
+            mask_raw = cv2.cvtColor(mask_raw, cv2.COLOR_BGR2GRAY)
+
+        image = vessels._resize_to_working_width(image)
+        mask = _remap_mask_to_class_indices(mask_raw)
+        mask = cv2.resize(mask.astype(np.uint8), (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+        cv2.imwrite(img_out, image)
+        cv2.imwrite(msk_out, mask)  # already class indices {0,1,2}, not raw values
+        written += 1
+
+    return {"total": len(pairs), "written": written, "skipped_existing": skipped}
 
 
 def _remap_mask_to_class_indices(mask: np.ndarray) -> np.ndarray:
@@ -207,23 +276,90 @@ class OpticDiscDataset(Dataset):
     approximate.
     """
 
-    def __init__(self, pairs: list[tuple[str, str]], roi_width: int = DISC_ROI_WIDTH, train: bool = False):
+    def __init__(
+        self,
+        pairs: list[tuple[str, str]],
+        roi_width: int = DISC_ROI_WIDTH,
+        train: bool = False,
+        working_resolution: bool = True,
+        working_cache_root: str | None = None,
+    ):
         self.pairs = pairs
         self.roi_width = roi_width
         self.train = train
+        # When set, samples are read from build_working_cache()'s pre-resized
+        # PNGs instead of decoding the native image every epoch (~8x cheaper).
+        # Implies working_resolution -- the cache IS at working resolution.
+        self.working_cache_root = working_cache_root
+        # `working_resolution=False` reproduces the pre-2026-07-14 behaviour
+        # (crop from the native-resolution image), which is what every checkpoint
+        # before optic_disc_unet.riga_pooled.pth was trained with. Kept so that
+        # old result can be reproduced, NOT because it is correct -- see the note
+        # in __getitem__: it does not match what inference does.
+        self.working_resolution = working_resolution
 
     def __len__(self) -> int:
         return len(self.pairs)
 
     def __getitem__(self, idx: int):
         image_path, mask_path = self.pairs[idx]
+
+        if self.working_cache_root is not None:
+            # Cached entries are ALREADY at working resolution and already
+            # remapped to class indices -- see build_working_cache().
+            img_path, msk_path = _working_cache_paths(self.working_cache_root, image_path)
+            image = cv2.imread(img_path, cv2.IMREAD_COLOR)
+            mask = cv2.imread(msk_path, cv2.IMREAD_GRAYSCALE)
+            if image is None or mask is None:
+                raise FileNotFoundError(f"Working cache miss for {image_path} -- run build_working_cache() first")
+            mask = mask.astype(np.int64)
+            bbox_info = _disc_bbox_from_mask(mask)
+            return self._finish(image, mask, bbox_info)
+
         image = cv2.imread(image_path, cv2.IMREAD_COLOR)
         mask_raw = cv2.imread(mask_path, cv2.IMREAD_UNCHANGED)
         if mask_raw.ndim == 3:
             mask_raw = cv2.cvtColor(mask_raw, cv2.COLOR_BGR2GRAY)
         mask = _remap_mask_to_class_indices(mask_raw)
 
+        if self.working_resolution:
+            # Downscale to VESSEL_WORKING_WIDTH *before* cropping, because that is
+            # what INFERENCE does (optic_disc_infer.compute_optic_biomarkers_hybrid
+            # resizes to the working width and only then calls crop_disc_roi).
+            #
+            # Without this, training and inference feed the U-Net crops of
+            # different sharpness: at REFUGE2's native 2056px a disc is ~185px, so
+            # the 3-diameter ROI is ~555px and gets DOWNsampled into the 512 input
+            # (sharp); at the 1400px working width the same disc is ~126px, the ROI
+            # is ~378px, and it gets UPsampled into 512 (soft). The model then
+            # trains on sharp crops and is deployed on blurry ones -- the same
+            # family of train/inference mismatch as the glaucoma ONH crop bug, and
+            # a plausible part of why full-pipeline Dice (0.855/0.821) trails the
+            # Dice reported during training on ground-truth crops (0.894/0.858).
+            #
+            # It also makes training tractable: the worker processes stop holding
+            # full-resolution frames (REFUGE2 2056x2124, RIGA 2240x1488), which is
+            # what was exhausting memory and killing the pooled run outright at the
+            # epoch->validation boundary, when the second worker pool spawns.
+            image = vessels._resize_to_working_width(image)
+            mask = cv2.resize(
+                mask.astype(np.uint8),
+                (image.shape[1], image.shape[0]),
+                interpolation=cv2.INTER_NEAREST,
+            ).astype(np.int64)
+
         bbox_info = _disc_bbox_from_mask(mask)
+        return self._finish(image, mask, bbox_info)
+
+    def _finish(self, image: np.ndarray, mask: np.ndarray, bbox_info: dict):
+        """Crop the ROI (jittered in train mode), augment, and build the tensors.
+
+        Shared by BOTH the cached and uncached paths above, on purpose: a cached
+        sample and an uncached one must be identical apart from where the pixels
+        were read from. Duplicating this tail is exactly how a cache silently
+        starts producing a different distribution than the code it is meant to
+        be an optimisation of.
+        """
         center_xy, diameter_px = bbox_info["center_xy"], bbox_info["diameter_px"]
 
         if self.train:

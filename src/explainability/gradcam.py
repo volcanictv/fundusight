@@ -27,13 +27,15 @@ def _target_layer(model: nn.Module) -> list:
     return [model.features[-1]]
 
 
-def generate_cam(model: nn.Module, image: np.ndarray, method: str = "gradcam", target_class: int | None = None) -> np.ndarray:
-    """Overlay a class activation heatmap on `image` (BGR, cv2 convention).
+def compute_cam(model: nn.Module, image: np.ndarray, method: str = "gradcam", target_class: int | None = None) -> np.ndarray:
+    """The raw class activation map for `image` (BGR, cv2 convention), as a
+    float32 (IMAGE_SIZE, IMAGE_SIZE) array in [0, 1] — no overlay, no color.
 
-    `target_class` selects which class's activation to explain; defaults to
-    the model's own top prediction. Returns a BGR uint8 overlay resized to
-    IMAGE_SIZE x IMAGE_SIZE — what the model actually saw, not the original
-    resolution, so the heatmap lines up exactly with the input.
+    Split out from generate_cam() so attention can be MEASURED, not just
+    looked at: quantifying how much of a model's attention falls on a given
+    anatomical region (see scripts/compare_glaucoma_attention.py) needs the
+    heatmap as numbers, and re-deriving it there would risk measuring a
+    slightly different CAM than the one the report actually displays.
     """
     if method not in CAM_METHODS:
         raise ValueError(f"Unknown CAM method: {method!r}. Choose from {list(CAM_METHODS)}")
@@ -48,8 +50,20 @@ def generate_cam(model: nn.Module, image: np.ndarray, method: str = "gradcam", t
 
     cam_class = CAM_METHODS[method]
     with cam_class(model=model, target_layers=_target_layer(model)) as cam:
-        grayscale_cam = cam(input_tensor=input_tensor, targets=targets)[0]
+        return cam(input_tensor=input_tensor, targets=targets)[0]
 
+
+def generate_cam(model: nn.Module, image: np.ndarray, method: str = "gradcam", target_class: int | None = None) -> np.ndarray:
+    """Overlay a class activation heatmap on `image` (BGR, cv2 convention).
+
+    `target_class` selects which class's activation to explain; defaults to
+    the model's own top prediction. Returns a BGR uint8 overlay resized to
+    IMAGE_SIZE x IMAGE_SIZE — what the model actually saw, not the original
+    resolution, so the heatmap lines up exactly with the input.
+    """
+    grayscale_cam = compute_cam(model, image, method=method, target_class=target_class)
+
+    rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     resized_rgb = cv2.resize(rgb, (IMAGE_SIZE, IMAGE_SIZE)).astype(np.float32) / 255.0
     overlay_rgb = show_cam_on_image(resized_rgb, grayscale_cam, use_rgb=True)
 

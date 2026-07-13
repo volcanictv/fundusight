@@ -187,16 +187,26 @@ disappears, not a crash.
 
 1. Push the repo to GitHub (already done here:
    `https://github.com/volcanictv/fundusight`).
-2. Publish trained checkpoints as GitHub Release assets — one-time, this is
-   what step "1" above downloads from:
+2. Publish trained checkpoints as GitHub Release assets — this is what step
+   "1" above downloads from. The tag must match `DEFAULT_TAG` in
+   `src/app/checkpoints.py` (currently `v1.1.0`):
    ```
-   gh release create v1.0.0 checkpoints/dr_efficientnet_b0.pth \
+   gh release create v1.1.0 checkpoints/dr_efficientnet_b0.pth \
        checkpoints/glaucoma_efficientnet_b0.pth checkpoints/amd_efficientnet_b0.pth \
        checkpoints/vessel_unet.pth checkpoints/optic_disc_unet.pth \
-       --title "v1.0.0" --notes "Fundusight v1.0.0 trained checkpoints"
+       --title "v1.1.0" --notes "Fundusight v1.1.0 trained checkpoints (ONH-cropped glaucoma)"
    ```
    (Requires the [`gh` CLI](https://cli.github.com/), logged in, run from
    the repo root with the checkpoints present locally.)
+
+   **When you retrain a checkpoint, cut a NEW tag and bump `DEFAULT_TAG` in
+   the same commit — never overwrite an already-published asset.** The live
+   app fetches from whatever tag the deployed branch's code names, so
+   clobbering an asset swaps the weights out from under code that is still
+   running. v1.1.0's glaucoma checkpoint classifies an *optic-nerve-head
+   crop*; v1.0.0's classified a *full fundus photo*. Feeding either one the
+   other's input produces confident, meaningless probabilities rather than a
+   visible error — see `src/detection/onh_crop.py`.
 3. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with
    GitHub.
 4. Click **"New app"** and point it at this repo by URL:

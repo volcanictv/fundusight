@@ -5,9 +5,11 @@ from src.segmentation.optic_disc import (
     DISC_ROI_WIDTH,
     _largest_component_mask,
     _vertical_extent,
+    assess_disc_plausibility,
     clean_disc_cup_masks,
     compute_cdr,
     compute_optic_biomarkers,
+    compute_vascular_convergence,
     crop_disc_roi,
     enforce_cup_within_disc,
     extract_color_features,
@@ -26,6 +28,51 @@ _TISSUE_VALUE = 90
 _DISC_VALUE = 200
 _CUP_VALUE = 240
 _MACULA_VALUE = 20
+
+# Vessels are DARKER than tissue in the green channel (hemoglobin absorbs
+# green) -- the convergence prior's Frangi pass looks for dark ridges.
+_VESSEL_VALUE = 25
+# The confuser: brighter than the disc itself, and avascular. Stands in for
+# the dense exudate cluster / specular camera reflection that beats the real
+# disc in a pure brightness search.
+_DECOY_VALUE = 255
+
+
+def _fundus_with_vessels_and_bright_decoy(native_width=1000):
+    """A synthetic fundus posing the exact failure the vascular convergence
+    prior exists to fix: a real optic disc with vessels radiating from it,
+    plus a BRIGHTER avascular blob elsewhere in the frame.
+
+    A pure brightness search must prefer the decoy here -- it is both brighter
+    than the disc and uniform, while the real disc's box-filter average is
+    dragged down by the dark vessels crossing it. Only the anatomical prior
+    ("vessels converge on the disc, not on an exudate") can break the tie
+    correctly. Returns (image, disc_center, decoy_center) in native coords.
+    """
+    image = np.zeros((native_width, native_width, 3), dtype=np.uint8)
+    center = native_width // 2
+    cv2.circle(image, (center, center), int(native_width * 0.45), (_TISSUE_VALUE,) * 3, -1)
+
+    disc_center = (int(center + native_width * 0.15), center)
+    disc_diameter = native_width * 0.10
+    cv2.circle(image, disc_center, int(disc_diameter / 2), (_DISC_VALUE,) * 3, -1)
+
+    # Vessels radiating outward from the disc, the structure the prior keys
+    # on. Ten rays: enough that their direction lines all intersect at the
+    # disc and nowhere else.
+    for angle in np.linspace(0, 2 * np.pi, 10, endpoint=False):
+        end = (
+            int(disc_center[0] + np.cos(angle) * native_width * 0.40),
+            int(disc_center[1] + np.sin(angle) * native_width * 0.40),
+        )
+        cv2.line(image, disc_center, end, (_VESSEL_VALUE,) * 3, 6)
+
+    # Placed off the radial rays so it genuinely has no vessels converging on
+    # it -- the whole point of the decoy.
+    decoy_center = (int(center - native_width * 0.22), int(center - native_width * 0.20))
+    cv2.circle(image, decoy_center, int(disc_diameter / 2), (_DECOY_VALUE,) * 3, -1)
+
+    return image, disc_center, decoy_center
 
 
 def _fundus_with_disc(native_width, disc_offset_frac=(0.15, -0.05), disc_diameter_frac=0.14, cup_frac=0.4, macula=True):
@@ -96,6 +143,128 @@ def test_locate_disc_classical_handles_empty_fov():
 
     assert not result["found"]
     assert result["diameter_px"] > 0  # still a usable fallback, never zero/NaN
+    # A disc that couldn't be located at all can't have a trustworthy crop
+    # either -- never report confidence for it.
+    assert not result["confident"]
+    assert result["implausible_reasons"]
+
+
+def _distance(a, b):
+    return float(np.hypot(a[0] - b[0], a[1] - b[1]))
+
+
+def test_vascular_convergence_peaks_on_the_vessel_hub_not_the_bright_decoy():
+    image, disc_center, decoy_center = _fundus_with_vessels_and_bright_decoy()
+    scale = VESSEL_WORKING_WIDTH / image.shape[1]
+
+    convergence = compute_vascular_convergence(image)
+
+    assert convergence.min() >= 0.0 and convergence.max() <= 1.0
+    disc_w = (disc_center[0] * scale, disc_center[1] * scale)
+    decoy_w = (decoy_center[0] * scale, decoy_center[1] * scale)
+    # The map must rate the vessel hub far above the avascular blob -- that
+    # gap is the entire mechanism the localizer relies on below.
+    assert convergence[int(disc_w[1]), int(disc_w[0])] > convergence[int(decoy_w[1]), int(decoy_w[0])]
+
+
+def test_brightness_alone_is_fooled_by_the_bright_avascular_decoy():
+    # The bug, reproduced. This test EXISTS to fail if someone ever makes the
+    # brightness-only path pass -- it pins the reason the prior is needed.
+    image, disc_center, decoy_center = _fundus_with_vessels_and_bright_decoy()
+    scale = VESSEL_WORKING_WIDTH / image.shape[1]
+
+    result = locate_disc_classical(image, use_vascular_prior=False)
+    found = result["center_xy"]
+
+    disc_w = (disc_center[0] * scale, disc_center[1] * scale)
+    decoy_w = (decoy_center[0] * scale, decoy_center[1] * scale)
+    assert _distance(found, decoy_w) < _distance(found, disc_w)
+
+
+def test_vascular_prior_rescues_the_localizer_from_the_bright_decoy():
+    # The fix. Same image, prior enabled -- the disc must now win.
+    image, disc_center, decoy_center = _fundus_with_vessels_and_bright_decoy()
+    scale = VESSEL_WORKING_WIDTH / image.shape[1]
+
+    result = locate_disc_classical(image, use_vascular_prior=True)
+    found = result["center_xy"]
+
+    disc_w = (disc_center[0] * scale, disc_center[1] * scale)
+    decoy_w = (decoy_center[0] * scale, decoy_center[1] * scale)
+    assert result["found"]
+    assert result["vascular_prior_used"]
+    assert _distance(found, disc_w) < _distance(found, decoy_w)
+    # Not merely "closer to the disc than to the decoy" -- actually ON it.
+    assert _distance(found, disc_w) < (image.shape[1] * 0.10 * scale) / 2.0
+
+
+def test_vascular_convergence_degrades_to_empty_map_when_there_are_no_vessels():
+    # A vessel-extraction failure (blank/degenerate photo) must yield an
+    # all-zero map, which locate_disc_classical() treats as "no vascular
+    # evidence" and falls back to brightness -- rather than multiplying its
+    # whole score surface to zero and returning a meaningless argmax.
+    blank = np.zeros((300, 300, 3), dtype=np.uint8)
+
+    convergence = compute_vascular_convergence(blank)
+
+    assert convergence.max() == 0.0
+    assert not locate_disc_classical(blank)["vascular_prior_used"]
+
+
+def test_locate_disc_classical_is_confident_on_a_clean_round_disc():
+    # disc_diameter_frac=0.10 rather than the fixture's 0.14 default: real
+    # optic discs measure ~0.09 of image width (ADAM ground truth, mean
+    # 0.092 / p90 0.116), so the default draws an unrealistically large disc
+    # that the size check correctly rejects. Confidence is only meaningful
+    # against a realistically-proportioned disc.
+    image, _center, _diameter = _fundus_with_disc(VESSEL_WORKING_WIDTH * 2, disc_diameter_frac=0.10, macula=False)
+
+    result = locate_disc_classical(image)
+
+    assert result["found"]
+    assert result["confident"]
+    assert result["implausible_reasons"] == []
+
+
+def test_assess_disc_plausibility_rejects_ragged_blob():
+    # The hemorrhage/exudate case: a blob that won the brightness search but
+    # is nowhere near disc-shaped. On ADAM's ground truth, wrong
+    # localizations average ~0.07 circularity vs ~0.34 for correct ones.
+    geometry = {"diameter_px": 60.0, "circularity": 0.06, "solidity": 0.7, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
+    assert any("disc-shaped" in r for r in result["reasons"])
+
+
+def test_assess_disc_plausibility_rejects_oversized_blob():
+    # Wrong crops are systematically LARGER than real discs (a confluent
+    # exudate/hemorrhage patch outgrows a disc) -- the size cap catches the
+    # one ragged-blob case circularity alone misses.
+    geometry = {"diameter_px": 120.0, "circularity": 0.9, "solidity": 0.95, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
+    assert any("implausible size" in r for r in result["reasons"])
+
+
+def test_assess_disc_plausibility_accepts_a_real_looking_disc():
+    geometry = {"diameter_px": 60.0, "circularity": 0.4, "solidity": 0.9, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert result["plausible"]
+    assert result["reasons"] == []
+
+
+def test_assess_disc_plausibility_treats_unmeasurable_shape_as_not_confident():
+    geometry = {"diameter_px": 60.0, "circularity": float("nan"), "solidity": float("nan"), "measured": False}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
 
 
 def test_crop_disc_roi_shape_and_squareness():
@@ -319,8 +488,15 @@ def test_compute_optic_biomarkers_returns_expected_keys_and_shapes():
         "cup_diameter_px",
         "macula_location",
         "disc_found",
+        "disc_confident",
+        "disc_localization_warnings",
         "macula_found",
+        "disc_localization_source",
     }
+    # The classical path can never reach Stage 6.0 (that locator is a torch
+    # model, and this module is deliberately torch-free) -- but it must still
+    # report the key, so callers never have to guard for its absence.
+    assert result["disc_localization_source"] == "classical"
     assert result["disc_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert result["cup_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert result["disc_mask"].dtype == bool
