@@ -3,10 +3,12 @@ import numpy as np
 import torch
 
 from src.segmentation import optic_disc
+from src.segmentation.disc_locator_model import build_disc_locator_model
 from src.segmentation.optic_disc_infer import (
     _cached_model,
     compute_optic_biomarkers_auto,
     compute_optic_biomarkers_hybrid,
+    load_disc_locator_model,
     load_optic_disc_model,
     segment_disc_cup_hybrid,
 )
@@ -102,7 +104,12 @@ def test_compute_optic_biomarkers_hybrid_returns_same_keys_as_classical():
         "disc_confident",
         "disc_localization_warnings",
         "macula_found",
+        "disc_localization_source",
     }
+    # No locator model passed -> Stage 6.0 is unreachable, so the hybrid path
+    # must land on the same source the classical path reports. This is the test
+    # that keeps the two return contracts from drifting apart.
+    assert result["disc_localization_source"] == "classical"
     assert result["disc_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert result["cup_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert not np.any(result["cup_mask"] & ~result["disc_mask"])
@@ -137,12 +144,40 @@ def test_compute_optic_biomarkers_auto_uses_hybrid_when_checkpoint_exists(tmp_pa
     torch.save(original.state_dict(), weights_path)
     image = _fundus_image()
 
-    result = compute_optic_biomarkers_auto(image, weights_path=weights_path)
+    # locator_weights_path is pinned at a path that does NOT exist, on purpose.
+    # Without it, this test silently reads whatever is in the real
+    # checkpoints/ directory: it began failing the moment a Stage 6.0 checkpoint
+    # was trained, because `auto` picked the locator up while `expected` (which
+    # passes no locator) did not. A test whose result depends on ambient
+    # filesystem state is not a test.
+    no_locator = str(tmp_path / "no_locator.pth")
+    result = compute_optic_biomarkers_auto(image, weights_path=weights_path, locator_weights_path=no_locator)
     model = load_optic_disc_model(weights_path, device="cpu")
     expected = compute_optic_biomarkers_hybrid(image, model)
 
     assert np.array_equal(result["disc_mask"], expected["disc_mask"])
     assert np.array_equal(result["cup_mask"], expected["cup_mask"])
+
+
+def test_compute_optic_biomarkers_auto_wires_in_the_locator_when_its_checkpoint_exists(tmp_path):
+    # The other half of the contract: when a Stage 6.0 checkpoint IS present,
+    # `auto` must actually route localization through it rather than quietly
+    # ignoring it. Compared against hybrid called with the locator EXPLICITLY,
+    # so this pins the wiring, not the locator's accuracy.
+    disc_weights = str(tmp_path / "optic_disc_unet.pth")
+    torch.save(build_optic_disc_model().state_dict(), disc_weights)
+    locator_weights = str(tmp_path / "disc_locator.pth")
+    torch.save(build_disc_locator_model().state_dict(), locator_weights)
+    image = _fundus_image()
+
+    result = compute_optic_biomarkers_auto(image, weights_path=disc_weights, locator_weights_path=locator_weights)
+
+    model = load_optic_disc_model(disc_weights, device="cpu")
+    locator = load_disc_locator_model(locator_weights, device="cpu")
+    expected = compute_optic_biomarkers_hybrid(image, model, locator_model=locator)
+
+    assert np.array_equal(result["disc_mask"], expected["disc_mask"])
+    assert result["disc_localization_source"] == expected["disc_localization_source"]
 
 
 def test_cached_model_reuses_same_instance_for_same_weights_path(tmp_path):

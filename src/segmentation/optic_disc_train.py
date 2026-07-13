@@ -41,22 +41,48 @@ from tqdm import tqdm
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, PROJECT_ROOT)
-from src.segmentation.optic_disc_dataset import DISC_ROI_WIDTH, OpticDiscDataset, build_pooled_pairs, split_pooled_pairs
+from src.segmentation.optic_disc_dataset import (
+    DISC_ROI_WIDTH,
+    WORKING_CACHE_DIRNAME,
+    OpticDiscDataset,
+    build_pooled_pairs,
+    build_working_cache,
+    split_pooled_pairs,
+)
 from src.segmentation.optic_disc_loss import DiceCELoss, multiclass_dice_per_class
 from src.segmentation.optic_disc_model import OUT_CHANNELS, build_optic_disc_model
+from src.segmentation.riga_dataset import build_riga_pairs
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Train the REFUGE2-based optic disc/cup segmentation model.")
     parser.add_argument("--refuge-root", default=os.path.join(PROJECT_ROOT, "REFUGE2"))
     parser.add_argument("--epochs", type=int, default=80)
-    parser.add_argument("--batch-size", type=int, default=16)
+    # 8, NOT 16. At 512x512 with 7 input channels this U-Net peaks at ~11.6 GB of
+    # GPU memory at batch 16 -- more than the 8 GB on the RTX 4060 Laptop this
+    # repo trains on. It does not OOM cleanly: it spills into shared host memory
+    # and thrashes, which makes the step **17x slower** (7.33 s/batch vs 0.42
+    # s/batch at batch 8, measured) and turns a ~1.2 min epoch into a ~10 min one.
+    #
+    # This wasted several training runs, because the symptom is not an error --
+    # it is a run that silently takes hours and gets killed before finishing an
+    # epoch. If training feels inexplicably slow, measure the GPU step time on a
+    # synthetic batch before optimising the data pipeline; the bottleneck here was
+    # never data loading.
+    parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--roi-width", type=int, default=DISC_ROI_WIDTH)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--dice-weight", type=float, default=0.5)
     parser.add_argument("--num-workers", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", default=os.path.join(PROJECT_ROOT, "checkpoints", "optic_disc_unet.pth"))
+    parser.add_argument(
+        "--include-riga",
+        action="store_true",
+        help="Pool RIGA's ~749 six-annotator-consensus images with REFUGE2 (adds 6 camera domains).",
+    )
+    parser.add_argument("--riga-root", default=os.path.join(PROJECT_ROOT, "data"))
+    parser.add_argument("--riga-cache", default=os.path.join(PROJECT_ROOT, "data", "riga_masks"))
     return parser.parse_args()
 
 
@@ -107,13 +133,59 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    pooled = build_pooled_pairs(args.refuge_root)
-    train_pairs, valid_pairs, test_pairs = split_pooled_pairs(pooled, seed=args.seed)
-    print(f"Pooled {len(pooled)} labeled pairs, re-split: train={len(train_pairs)}  val={len(valid_pairs)}  test={len(test_pairs)}")
+    # REFUGE2 is split FIRST and on its own, exactly as it always has been (same
+    # 1200 pairs, same seed) -- so its train/val/test assignment is byte-for-byte
+    # what every previous REFUGE2-only checkpoint was trained and scored against.
+    #
+    # This is load-bearing for the comparison, not a stylistic choice. Pooling
+    # REFUGE2 + RIGA and THEN splitting reshuffles REFUGE2's assignment, which
+    # would put images from the OLD model's test split into the NEW model's
+    # training set. The two checkpoints could then not be compared at all: the
+    # new one would score better on a test set it had partly memorised, and the
+    # improvement would be an artifact. Splitting each dataset independently and
+    # concatenating keeps REFUGE2's 180 test images clean for BOTH models, which
+    # is the only way "did RIGA help?" has a meaningful answer.
+    refuge = build_pooled_pairs(args.refuge_root)
+    train_pairs, valid_pairs, test_pairs = split_pooled_pairs(refuge, seed=args.seed)
 
-    train_ds = OpticDiscDataset(train_pairs, roi_width=args.roi_width, train=True)
-    val_ds = OpticDiscDataset(valid_pairs, roi_width=args.roi_width, train=False)
-    test_ds = OpticDiscDataset(test_pairs, roi_width=args.roi_width, train=False)
+    if args.include_riga:
+        # RIGA adds six more camera/clinic domains to REFUGE2's three. This is
+        # not about "more data" -- it is specifically about DOMAIN COVERAGE, and
+        # the evidence for it is direct (scripts/evaluate_on_riga.py): the
+        # REFUGE2-only model holds up on RIGA's MESSIDOR subset (mean |CDR error|
+        # 0.065) but collapses on BinRushed1 (0.167) and Magrabia-male (0.180) --
+        # at or above the 0.166 that six ophthalmologists disagree with EACH
+        # OTHER by, i.e. useless on those cameras. It also carries a systematic
+        # +0.0384 CDR bias out-of-domain that is absent in-domain.
+        #
+        # In-domain CDR accuracy is NOT the target here and must not be used to
+        # judge this: it is already below the human noise floor and cannot
+        # meaningfully improve (see DEEP_DIVE.md). Out-of-domain ROBUSTNESS is.
+        riga = build_riga_pairs(args.riga_root, args.riga_cache)
+        if not riga:
+            sys.exit(f"--include-riga given but no masks in {args.riga_cache}. Build them with riga_dataset.build_riga_mask_cache().")
+
+        riga_train, riga_valid, riga_test = split_pooled_pairs(riga, seed=args.seed)
+        train_pairs += riga_train
+        valid_pairs += riga_valid
+        test_pairs += riga_test
+        print(f"Pooled REFUGE2 ({len(refuge)}) + RIGA ({len(riga)}) = {len(refuge) + len(riga)} pairs, split independently")
+
+    print(f"Splits: train={len(train_pairs)}  val={len(valid_pairs)}  test={len(test_pairs)}")
+
+    # Pre-resize every frame once. Decoding native RIGA/REFUGE2 images every epoch
+    # made the data pipeline the bottleneck AND forced DataLoader worker processes
+    # that (holding full-resolution frames, under CUDA, on Windows) killed the run
+    # silently and repeatedly. With the cache, loading is cheap enough to run
+    # single-process. See build_working_cache().
+    cache_root = os.path.join(PROJECT_ROOT, "data", WORKING_CACHE_DIRNAME)
+    print(f"\nBuilding working-resolution cache in {cache_root} (idempotent; skipped if present)...")
+    stats = build_working_cache(train_pairs + valid_pairs + test_pairs, cache_root)
+    print(f"  {stats}")
+
+    train_ds = OpticDiscDataset(train_pairs, roi_width=args.roi_width, train=True, working_cache_root=cache_root)
+    val_ds = OpticDiscDataset(valid_pairs, roi_width=args.roi_width, train=False, working_cache_root=cache_root)
+    test_ds = OpticDiscDataset(test_pairs, roi_width=args.roi_width, train=False, working_cache_root=cache_root)
 
     # persistent_workers keeps the worker pool alive across epochs instead
     # of respawning it every time -- num_workers=0 caused a severe I/O

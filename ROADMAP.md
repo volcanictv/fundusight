@@ -88,6 +88,37 @@ A two-stage hybrid pipeline, same shape as Phase 5's classical+learned
 split: a cheap classical stage handles localization/cropping, a trained
 model handles the hard segmentation decision within that crop.
 
+> **Localization hardening (2026-07-14).** Stage 6.1's brightness search was
+> failing on exactly the images that matter (pathology), so two things were
+> added. See DEEP_DIVE.md for both write-ups.
+>
+> 1. **Vascular convergence prior** (`optic_disc.compute_vascular_convergence`)
+>    — the disc is where the retinal vessels converge, which exudates,
+>    reflections and hemorrhages are not. Multiplying the brightness map by a
+>    directional vessel-voting accumulator took localization accuracy
+>    **85.9% → 94.1%** on ADAM's 270 ground-truth discs (**83.3% → 91.7%** on
+>    the pathological AMD subset), wrong crops 38 → 16, silent failures still 0.
+>    Usable (correct *and* confident) CDRs: **68.5% → 73.7%**.
+>    **This invalidated the plausibility thresholds** — they are a property of
+>    the localizer, not of discs — and re-sweeping moved circularity 0.19 → 0.10.
+>    Any future change to how the candidate is picked requires re-sweeping them.
+> 2. **Stage 6.0, a coarse full-frame locator** (`disc_locator_model.py`) — a
+>    small CNN that regresses the disc bbox from a downscaled WHOLE frame, used
+>    to arbitrate when Stage 6.1 reports low confidence, with a safe in-retina
+>    fallback ROI when both fail (`optic_disc_infer.locate_disc_arbitrated`).
+>    Deliberately a **separate model**, not a multi-task head on the Stage 6.2
+>    U-Net: that U-Net only ever sees an ONH crop Stage 6.1 already produced, so
+>    a head on it could only learn "where is the disc inside a crop that already
+>    contains the disc" — and on the failing images the crop does not contain the
+>    disc at all. Running such a head on a full frame would be out-of-distribution
+>    inference, the same mistake the full-image glaucoma classifier made.
+>    Its position head is a **soft-argmax over a heatmap, not GAP → MLP**: GAP is
+>    translation-invariant by construction and cannot report *where* a feature
+>    fired. The GAP version was built first and failed exactly that way (val hit
+>    rate collapsed 0.31 → 0.011 while train loss fell — it regressed to
+>    predicting the mean disc position). Use GAP for "what/how much", never for
+>    "where".
+
 - Stage 6.1 (classical): locate the optic nerve head (ONH) as the center
   of the brightest disc-sized *compact* patch within the field-of-view
   mask (a windowed-average-brightness peak, not a global brightness

@@ -32,7 +32,7 @@ a second, independent notion of "canonical resolution."
 
 import cv2
 import numpy as np
-from skimage.filters import threshold_otsu
+from skimage.filters import frangi, threshold_otsu
 from skimage.measure import label, regionprops
 
 from src.segmentation import vessels
@@ -80,28 +80,131 @@ _DIAMETER_REFINEMENT_MAX_FACTOR = 2.5
 #
 # Calibrated (not guessed) against ADAM's 270 annotated ground-truth
 # Disc_Masks -- see scripts/evaluate_disc_localization.py and DEEP_DIVE.md.
-# At these values the checks flag 38/38 (100%) of the localizations that
-# actually land outside the true disc, at the cost of flagging 47/232
-# (20.3%) of correct ones. That asymmetry is deliberate: a false alarm just
+# At these values the checks flag 16/16 (100%) of the localizations that
+# actually land outside the true disc, at the cost of flagging 55/254
+# (21.7%) of correct ones. That asymmetry is deliberate: a false alarm just
 # annotates the CDR as low-confidence, while a miss silently reports a CDR
 # measured off the wrong anatomy, which is the failure this exists to stop.
 #
-# Circularity is by far the strongest single cue (AUC 0.945 separating
-# correct from incorrect localizations) and catches 37 of the 38; the size
-# cap catches 23 and, crucially, the one circularity misses. Note the size
-# check earns its keep in the MAX direction, not the min: wrong crops are
-# systematically LARGER than real discs (a hemorrhage or confluent exudate
-# patch outgrows a disc), which is the opposite of the intuition that a
-# spurious blob would be small.
+# RECALIBRATED when the vascular convergence prior landed. These thresholds
+# are a property of the LOCALIZER, not of optic discs in the abstract, so
+# changing how locate_disc_classical() picks its candidate invalidates them
+# and they must be re-swept -- do not treat them as fixed anatomical
+# constants. Concretely, the prior cut wrong crops 38 -> 16, and the 22
+# newly-correct localizations are the HARD, pathological ones, whose Otsu
+# blobs are raggeder (lower circularity) and larger than the easy discs the
+# old thresholds were fitted on. Left at the old circularity gate of 0.19,
+# those newly-correct crops got flagged as implausible and the false-alarm
+# rate rose to 31.5% -- i.e. the localizer improved while the guard silently
+# got worse. Re-sweeping (100% recall on the misses, minimising false
+# alarms) moved circularity 0.19 -> 0.10 and left the size cap at 0.12.
 #
-# Solidity is measured and returned as a diagnostic but is deliberately NOT
-# a gate: on this data it is entirely redundant with the two below (adding a
-# solidity gate at any threshold from 0.60-0.75 changed neither the 38
-# caught nor the 47 false alarms), so gating on it would be dead weight that
-# only looks like extra rigor.
-_MIN_DISC_CIRCULARITY = 0.19
+# Net effect on what actually matters, the share of images that yield a
+# usable (correct AND confident) CDR: 185/270 (68.5%) before the prior,
+# 199/270 (73.7%) after -- more usable CDRs AND fewer wrong crops.
+#
+# The size cap earns its keep in the MAX direction, not the min: wrong crops
+# are systematically LARGER than real discs (a hemorrhage or confluent
+# exudate patch outgrows a disc), the opposite of the intuition that a
+# spurious blob would be small. The min gate catches nothing on this data
+# (the smallest wrong crop measures 0.093) and is retained only as a guard
+# against degenerate blobs.
+#
+# KNOWN THIN MARGIN, do not "tidy" this away: 5 of the 16 wrong crops are
+# caught by the size cap ALONE, and two of them (N0159 at 0.126, N0201 at
+# 0.130) clear the 0.12 cap by less than 0.01. Raising _MAX_DISC_DIAMETER_
+# FRACTION even slightly would convert them into silent failures. The 100%
+# recall figure is real but it is not comfortable, and it rests on 16
+# examples.
+#
+# Two things measured and deliberately NOT gated on, because gating on them
+# would be dead weight that only looks like extra rigor:
+#   - Solidity: entirely redundant with the two gates below (a solidity gate
+#     anywhere in 0.60-0.75 changed neither the caught set nor the false
+#     alarms).
+#   - Convergence at the chosen center: a weak discriminator (AUC 0.761 vs
+#     circularity's 0.945) that adds nothing to the joint gate, for a
+#     structural reason worth remembering -- once the convergence map is used
+#     to PICK the peak, the peak is high-convergence by construction, even on
+#     the misses (max 0.957). Selecting on a signal destroys that signal's
+#     value as an independent check on the selection.
+_MIN_DISC_CIRCULARITY = 0.10
 _MIN_DISC_DIAMETER_FRACTION = 0.04
 _MAX_DISC_DIAMETER_FRACTION = 0.12
+
+# --- Vascular convergence prior (see compute_vascular_convergence) ----------
+#
+# The optic disc is not merely "bright" -- anatomically it is the hub where
+# every primary retinal vessel enters and exits the eye. That is a property
+# the two things which beat it in a pure brightness search do NOT share: a
+# dense exudate cluster and a specular camera reflection are avascular, and
+# a sprawling hemorrhage has no vessels *converging* on it either. So a map
+# of "how strongly do vessel trajectories point at this pixel" is a nearly
+# orthogonal source of evidence to brightness, and multiplying the two
+# suppresses exactly the confusers brightness alone cannot reject.
+#
+# The prior is computed at a REDUCED resolution on purpose. Only the major
+# arcades carry convergence information -- thin peripheral vessels contribute
+# noise, not signal, to a "where do the trunks point" accumulator -- so
+# running a small Frangi at 1/4 scale is both more appropriate and ~10x
+# cheaper than reusing vessels.compute_frangi_response()'s 7-scale filter at
+# the full 1400px working width, which would roughly double pipeline cost for
+# a map that gets blurred anyway.
+_VASCULAR_SCALE = 0.25
+
+# Frangi scales for the reduced-resolution pass. These are vessels.py's
+# _FRANGI_SIGMAS multiplied by _VASCULAR_SCALE and truncated to the coarse
+# end: at 1/4 resolution a major arcade is only a few pixels across, and the
+# thin-vessel sigmas would resolve nothing but noise.
+_VASCULAR_FRANGI_SIGMAS = (1, 2, 3)
+
+# Only vessel pixels above this percentile of in-FOV vesselness get to vote.
+# A vote is a claim about a vessel's *direction*, and direction is only
+# meaningfully estimable where there is a real ridge -- letting weak/ambiguous
+# response vote would spray near-random directions into the accumulator.
+_VASCULAR_VOTE_PERCENTILE = 90.0
+
+# How far (as a fraction of image width) a vessel pixel casts its directional
+# vote. The disc sits within roughly half a frame of any arcade pixel; voting
+# further just lets far-side vessels smear votes across the whole image.
+_VASCULAR_VOTE_DISTANCE_FRACTION = 0.5
+
+# Gaussian smoothing of the raw accumulator, as a fraction of image width.
+# The accumulator is a sum of thin rays, so it is spiky; blurring at roughly
+# half a disc diameter turns "lines crossed near here" into a smooth basin
+# whose peak is stable, and matches the spatial precision the downstream
+# 3-disc-diameter crop actually needs.
+_VASCULAR_BLUR_FRACTION = 0.05
+
+# How much the prior is allowed to modulate the brightness score. The
+# combination is `brightness * ((1 - w) + w * convergence)`, NOT a bare
+# product: at w=1.0 a pixel with zero convergence scores zero, which makes the
+# localizer fail catastrophically (rather than merely badly) on any image
+# where vessel extraction itself breaks down -- a blurred, over-exposed, or
+# heavily media-opacified photo. The floor of (1 - w) keeps brightness as a
+# fallback signal that can still win when there is no vascular evidence
+# anywhere, so a vessel-extraction failure degrades to the OLD behaviour
+# instead of to garbage.
+#
+# Calibrated against ADAM's 270 annotated ground-truth discs, not guessed
+# (see scripts/evaluate_disc_localization.py --sweep-vascular-prior).
+# Localization accuracy vs. this weight:
+#
+#     w=0.00 (brightness only, the old behaviour)  85.9%   AMD 83.3%
+#     w=0.30                                       93.3%   AMD 90.5%
+#     w=0.50                                       94.1%   AMD 91.7%
+#     w=0.70                                       93.7%   AMD 91.7%
+#     w=0.85                                       94.1%   AMD 91.7%
+#     w=1.00 (pure product, no fallback floor)     94.1%   AMD 91.7%
+#
+# Accuracy is FLAT from 0.5 upward, so the choice is not sensitive -- 0.5 is
+# picked as the most conservative point on that plateau, since it retains the
+# largest brightness fallback (a 0.5 floor) for the vessel-extraction-failure
+# case above while still scoring at the plateau maximum. Note the gain is
+# largest exactly where it was designed to be: the AMD subset (hemorrhages,
+# exudate) improves 83.3% -> 91.7%, halving the wrong crops on the
+# pathological population the brightness search was failing on.
+_VASCULAR_PRIOR_WEIGHT = 0.5
 
 # How far from the disc center (in multiples of disc diameter) to search
 # for the macula/fovea -- clinically the macula sits roughly 2-2.5 disc
@@ -146,10 +249,137 @@ def _unlocated_disc(center_xy: tuple, expected_diameter: float, reason: str) -> 
         "solidity": float("nan"),
         "diameter_fraction": float("nan"),
         "implausible_reasons": [reason],
+        "vascular_prior_used": False,
     }
 
 
-def locate_disc_classical(image: np.ndarray) -> dict:
+def _vessel_direction_field(vesselness: np.ndarray, sigma: float) -> tuple:
+    """Per-pixel unit vector pointing ALONG the local vessel ridge, estimated
+    from the structure tensor of the vesselness response.
+
+    The structure tensor J = G_sigma * (grad v)(grad v)^T has its dominant
+    eigenvector along the direction of greatest intensity change. On a ridge
+    that direction is ACROSS the vessel, so the vessel's own direction is the
+    perpendicular one -- which is what we return.
+
+    Building the tensor from explicit Sobel gradients rather than
+    skimage.feature.structure_tensor is deliberate: skimage's `order='rc'`
+    returns row/column-ordered elements, and silently mixing that up with an
+    (x, y) convention would rotate every direction by 90 degrees -- producing
+    an accumulator that votes ACROSS vessels instead of along them, which
+    would look like a plausible map while being exactly wrong. Doing the two
+    Sobels by hand keeps the axis convention explicit and auditable.
+
+    Returns `(dx, dy)`, both float32 arrays the shape of `vesselness`. The
+    sign of the vector is arbitrary (a ridge has no head or tail), which is
+    why the caller votes in BOTH the +d and -d directions.
+    """
+    gx = cv2.Sobel(vesselness, cv2.CV_32F, 1, 0, ksize=5)
+    gy = cv2.Sobel(vesselness, cv2.CV_32F, 0, 1, ksize=5)
+
+    jxx = cv2.GaussianBlur(gx * gx, (0, 0), sigmaX=sigma)
+    jyy = cv2.GaussianBlur(gy * gy, (0, 0), sigmaX=sigma)
+    jxy = cv2.GaussianBlur(gx * gy, (0, 0), sigmaX=sigma)
+
+    # Orientation of the dominant gradient (across the vessel).
+    theta = 0.5 * np.arctan2(2.0 * jxy, jxx - jyy)
+    # Rotate 90 degrees to get the along-vessel direction.
+    return (-np.sin(theta)).astype(np.float32), np.cos(theta).astype(np.float32)
+
+
+def compute_vascular_convergence(image: np.ndarray) -> np.ndarray:
+    """Map of "how strongly do retinal vessel trajectories converge here",
+    normalized to [0, 1] and returned at the caller's working-image
+    resolution. This is the anatomical prior that tells the optic disc apart
+    from a bright thing that merely LOOKS like one.
+
+    Method (a directional Hough-style accumulator, not a density map):
+      1. Downscale, CLAHE, and run a small multi-scale Frangi filter to get a
+         coarse vesselness response dominated by the major arcades.
+      2. Estimate each strong vessel pixel's local direction from the
+         structure tensor (see _vessel_direction_field).
+      3. Have every such pixel cast a weighted vote along its own direction
+         -- in both directions, since a ridge orientation is sign-ambiguous
+         -- out to _VASCULAR_VOTE_DISTANCE_FRACTION of the frame.
+      4. Blur the accumulator and normalize.
+
+    Why VOTING rather than simply blurring the vessel mask into a density
+    map: vessel *density* is high all along the arcades, so a density map
+    peaks in a broad band rather than at the disc, and it would happily rank
+    a dense mid-arcade region above the disc itself. Convergence is the
+    property that is unique to the disc -- vessels radiate FROM it, so their
+    direction lines all pass THROUGH it and intersect there, while elsewhere
+    only a couple of near-parallel lines overlap. Isolated exudates and
+    specular reflections cast no votes at all, since they have no vessels.
+
+    Returns an all-zero map when vessel extraction finds nothing to work with
+    (no FOV, no vesselness response). Callers must treat an all-zero map as
+    "no vascular evidence available" and fall back to brightness alone rather
+    than multiplying their score to zero everywhere -- see
+    locate_disc_classical().
+    """
+    working = vessels._resize_to_working_width(image)
+    full_h, full_w = working.shape[:2]
+
+    small = cv2.resize(
+        working, (max(int(full_w * _VASCULAR_SCALE), 1), max(int(full_h * _VASCULAR_SCALE), 1)), interpolation=cv2.INTER_AREA
+    )
+    h, w = small.shape[:2]
+
+    green = vessels.extract_vessel_channel(small)
+    fov = vessels._fov_mask(green)
+    if not fov.any():
+        return np.zeros((full_h, full_w), dtype=np.float32)
+
+    enhanced = vessels.enhance_vessel_contrast(green).astype(np.float64) / 255.0
+    # black_ridges=True: vessels are DARKER than surrounding tissue in the
+    # green channel (hemoglobin absorbs green) -- same convention as
+    # vessels.compute_frangi_response().
+    vesselness = frangi(enhanced, sigmas=_VASCULAR_FRANGI_SIGMAS, black_ridges=True).astype(np.float32)
+    vesselness *= fov
+
+    in_fov_response = vesselness[fov]
+    if in_fov_response.size == 0 or in_fov_response.max() <= 0:
+        return np.zeros((full_h, full_w), dtype=np.float32)
+
+    vote_threshold = np.percentile(in_fov_response, _VASCULAR_VOTE_PERCENTILE)
+    voters = (vesselness >= vote_threshold) & fov & (vesselness > 0)
+    if not voters.any():
+        return np.zeros((full_h, full_w), dtype=np.float32)
+
+    dx, dy = _vessel_direction_field(vesselness, sigma=max(w * 0.01, 1.0))
+
+    ys, xs = np.nonzero(voters)
+    weights = vesselness[ys, xs].astype(np.float32)
+    vx, vy = dx[ys, xs], dy[ys, xs]
+
+    accumulator = np.zeros((h, w), dtype=np.float32)
+    max_steps = max(int(w * _VASCULAR_VOTE_DISTANCE_FRACTION), 1)
+
+    # Walk every voter one step at a time along +/- its own direction,
+    # accumulating with np.add.at (which, unlike fancy-index assignment,
+    # correctly ACCUMULATES rather than overwrites when several voters land on
+    # the same pixel -- the overwrite bug would silently turn this from a vote
+    # count into a "last writer wins" map and destroy the whole method).
+    for step in range(1, max_steps + 1):
+        for direction in (1.0, -1.0):
+            px = np.round(xs + direction * step * vx).astype(np.int32)
+            py = np.round(ys + direction * step * vy).astype(np.int32)
+            inside = (px >= 0) & (px < w) & (py >= 0) & (py < h)
+            np.add.at(accumulator, (py[inside], px[inside]), weights[inside])
+
+    accumulator *= fov
+    blurred = cv2.GaussianBlur(accumulator, (0, 0), sigmaX=max(w * _VASCULAR_BLUR_FRACTION, 1.0))
+
+    peak = blurred.max()
+    if peak <= 0:
+        return np.zeros((full_h, full_w), dtype=np.float32)
+    normalized = blurred / peak
+
+    return cv2.resize(normalized, (full_w, full_h), interpolation=cv2.INTER_LINEAR).astype(np.float32)
+
+
+def locate_disc_classical(image: np.ndarray, use_vascular_prior: bool = True) -> dict:
     """Locate the optic disc as the center of the brightest disc-sized
     *compact* patch within the field of view -- found via the average
     brightness within a sliding window sized to the expected disc diameter
@@ -206,7 +436,23 @@ def locate_disc_classical(image: np.ndarray) -> dict:
 
     window_size = max(int(expected_diameter), 3)
     windowed_brightness = cv2.boxFilter(green.astype(np.float32), ddepth=-1, ksize=(window_size, window_size))
-    candidate = np.where(fov, windowed_brightness, -1.0)
+
+    # Anatomical prior: the disc is where the vessels converge, not merely the
+    # brightest compact patch (see compute_vascular_convergence). An all-zero
+    # map means vessel extraction found nothing to work with -- multiplying by
+    # it would zero the whole score surface and make the argmax below
+    # meaningless, so in that case brightness is used alone, exactly as before
+    # this prior existed.
+    score = windowed_brightness
+    convergence_used = False
+    if use_vascular_prior:
+        convergence = compute_vascular_convergence(working)
+        if convergence.max() > 0:
+            w_prior = _VASCULAR_PRIOR_WEIGHT
+            score = windowed_brightness * ((1.0 - w_prior) + w_prior * convergence)
+            convergence_used = True
+
+    candidate = np.where(fov, score, -1.0)
     peak_y, peak_x = np.unravel_index(np.argmax(candidate), candidate.shape)
     center_xy = (float(peak_x), float(peak_y))
 
@@ -231,6 +477,7 @@ def locate_disc_classical(image: np.ndarray) -> dict:
         "solidity": geometry["solidity"],
         "diameter_fraction": geometry["diameter_px"] / w if geometry["measured"] else float("nan"),
         "implausible_reasons": plausibility["reasons"],
+        "vascular_prior_used": convergence_used,
     }
 
 
@@ -635,4 +882,11 @@ def compute_optic_biomarkers(image: np.ndarray) -> dict:
         "disc_confident": disc_info["confident"],
         "disc_localization_warnings": disc_info["implausible_reasons"],
         "macula_found": macula_info["found"],
+        # Always "classical" here: Stage 6.0's coarse locator is a torch model,
+        # so it lives in optic_disc_infer.py and cannot be reached from this
+        # deliberately torch-free module. Reported anyway so this function and
+        # compute_optic_biomarkers_hybrid() return the SAME KEYS -- a caller
+        # switching between the two paths must not have to guard for a missing
+        # key, which is the whole point of the shared return contract.
+        "disc_localization_source": "classical",
     }

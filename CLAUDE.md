@@ -23,6 +23,119 @@ limitation, one is blocked on missing data:
 3. **DR classifier has a real, LEARNED central spatial bias.** Preprocessing was ruled out (no crop anywhere in the path — the classifier gets the raw image; `preprocess()` is display-only). Confirming it against lesion locations is **blocked**: IDRiD's lesion masks ("A. Segmentation") are not downloaded, only "B. Disease Grading".
 4. **AMD classifier does not use the macula** — proven causally (remove the macula and 91.7% of AMD cases are still called AMD, p=0.979 vs a control region). **Deliberately not fixed** (the obvious fix depends on the unreliable macula heuristic). Hemorrhage-masking was investigated and is **not recommended** — see ROADMAP.md.
 
+**Localization hardening (2026-07-14).** Stage 6.1's disc localizer was failing
+on exactly the images that matter (hemorrhages, exudate, reflections). Two
+changes, both in DEEP_DIVE.md:
+1. **Vascular convergence prior** — `optic_disc.compute_vascular_convergence()`
+   maps where retinal vessels *converge* (a directional Hough-style accumulator
+   over vessel orientations, not a density map — density peaks along the whole
+   arcade, convergence only at the hub). `locate_disc_classical()` now scores
+   `brightness * ((1 - w) + w * convergence)`. Localization accuracy on ADAM's
+   270 ground-truth discs: **85.9% → 94.1%** (**83.3% → 91.7%** on the
+   pathological AMD subset); usable (correct AND confident) CDRs 68.5% → 73.7%;
+   silent failures still **0**. The `(1 - w)` floor is deliberate — a bare
+   product fails catastrophically when vessel extraction itself breaks down.
+2. **Stage 6.0 coarse full-frame locator** (`src/segmentation/disc_locator_*.py`)
+   arbitrates when Stage 6.1 says `confident=False`, and falls back to the FOV
+   centroid only when the candidate is *outside the retina*
+   (`optic_disc_infer.locate_disc_arbitrated()`). A confident classical
+   localization is **never** overruled by it (it was correct 199/199 on ADAM's
+   confident cases). End-to-end on ADAM: localization 254 → 257, usable CDRs
+   199 → 209, **0 broken, 0 silent failures**. Trained on REFUGE2, so ADAM is a
+   real cross-dataset test (held-out REFUGE2: hit rate 0.994, median center
+   error 0.0163 of frame width).
+   It is a **separate model, not a head on the Stage 6.2 U-Net** — that U-Net
+   only ever sees a crop Stage 6.1 already made, and on the failing images that
+   crop doesn't contain the disc at all, so no head reading it could point at
+   the disc. Running such a head on a full frame would be OOD inference, exactly
+   the full-image-glaucoma mistake.
+3. **Glaucoma was retrained** (2026-07-13 → 2026-07-14) because the prior moved
+   **100% of the ONH crops**: `accuracy=0.8667 auc=0.8274 sens=0.4444
+   spec=0.9242`. Read as a **wash, not a win** — AUC's 95% CI is [0.713, 0.925],
+   and at matched specificity sensitivity is 0.556 vs the old 0.611, a
+   difference of *one patient* out of 18 positives. The retrain is a
+   **correctness** fix, not a performance gain.
+
+**HARD COUPLING — `locate_disc_classical()` has two downstream dependents that
+break silently if you change it:**
+- The **plausibility thresholds** (`_MIN_DISC_CIRCULARITY` etc.) are calibrated
+  against a specific localizer's hit/miss distribution. Re-sweep them.
+- The **glaucoma ONH crop cache** (`REFUGE2/onh_crops/`) and the glaucoma
+  checkpoint trained on it. Rebuild the cache and retrain, or the classifier is
+  fed crops it never trained on — and it will not error, it will just be
+  confidently wrong. (Old cache kept at `REFUGE2/onh_crops.brightness_only_baseline/`.)
+
+**Two traps that generalize, learned the hard way here:**
+- **The plausibility thresholds are a property of the LOCALIZER, not of optic
+  discs.** Improving the localizer silently invalidated them — false alarms rose
+  20.3% → 31.5% with nothing failing, because the newly-rescued discs are the
+  hard, raggeder ones the old circularity gate rejected. Re-swept 0.19 → 0.10.
+  **Any change to how the disc candidate is picked requires re-sweeping them.**
+- **Never use a selection signal as its own confidence check.** Gating
+  plausibility on convergence-at-the-chosen-center looks obvious and is useless
+  (AUC 0.761 vs circularity's 0.945): once convergence *picks* the peak, the peak
+  is high-convergence by construction, even on the misses. An independent guard
+  must measure something the selection rule did not use — which is why the
+  *shape* gates work.
+- **Use GAP for "what/how much", never for "where".** The Stage 6.0 locator's
+  first design regressed coordinates from a global-average-pooled vector; GAP is
+  translation-invariant by construction, so it collapsed to predicting the mean
+  disc position (val hit rate 0.31 → 0.011 *while the training loss fell*).
+  Position now comes from a soft-argmax over a heatmap; GAP is retained only for
+  the size output, where translation-invariance is actually correct.
+
+**Optic disc/cup U-Net retrained on REFUGE2 + RIGA (2026-07-14).** RIGA
+(`src/segmentation/riga_dataset.py`, ~749 images, 6-annotator consensus) adds six
+camera domains to REFUGE2's three. This fixed a real **domain-shift bias**: the
+REFUGE2-only model over-estimated CDR by up to **+0.20** on unseen cameras.
+Pooled model: out-of-domain CDR error **0.0875 → 0.0420 (−52%)**, bias now within
+±0.06 everywhere, **no in-domain regression** (REFUGE2 dice_rim 0.8556 → 0.8592).
+Held-out pooled test `dice_rim=0.9058 dice_cup=0.8691 mean=0.8874`. Old checkpoint
+kept at `optic_disc_unet.refuge2_only.pth`.
+- RIGA ships **no masks** — labels are 6 ophthalmologists' contours drawn on copies
+  of the photo, recovered by differencing against the `prime` image. Note two data
+  quirks: `BinRushed1` has no primes (use `BinRushed1-Corrected`), and Magrabia's
+  female folder is misspelled `MagrabiFemale`.
+- **Split each dataset independently, THEN concatenate** (`optic_disc_train.py`).
+  Pooling first and splitting after reshuffles REFUGE2's assignment and leaks the
+  old model's test set into the new model's training set — the comparison then
+  silently flatters whatever is new.
+- **`--batch-size` must stay at 8.** At 16 this U-Net peaks at ~11.6 GB on an 8 GB
+  RTX 4060 — it does NOT OOM, it spills to host memory and runs **17x slower**
+  (7.33 vs 0.42 s/batch). The symptom is a run that inexplicably takes hours and
+  gets killed mid-epoch. If training feels slow, **time a synthetic GPU step before
+  touching the data pipeline** — this cost six training runs and an unnecessary
+  caching layer.
+- Training now crops at **working resolution**, matching inference. Previously it
+  cropped from the native image (sharp) while inference cropped from the 1400px
+  working image (soft) — a real train/inference mismatch.
+
+**The disc/cup CDR is at its label-noise floor IN-DOMAIN — but bias is a different
+story (2026-07-14).** Label noise explains *variance*, never *bias*. In-domain CDR
+error (0.044) is far below the measured human inter-observer disagreement (0.166,
+measured on RIGA's 6 annotators — see DEEP_DIVE), so no loss function will improve
+it. But a *systematic* offset on unseen cameras was never a noise-floor story — it
+was domain shift, and pooling RIGA fixed it. Don't let "we're at the noise floor"
+become a reason to stop looking at out-of-distribution behaviour.
+
+**Original note (still true, in-domain only):**
+The long-standing note that predicted disc/cup masks run ~1.5x/~3x ground-truth
+area is **stale**; it described the pre-pooled-split model. Measured on the current
+checkpoint: disc area ratio **1.002**, cup **1.029**, CDR bias **−0.0000**, mean
+|CDR error| **0.0436**. That residual is *variance, not bias*, and it is smaller
+than the ~0.1–0.2 inter-observer variability trained ophthalmologists show on
+vertical CDR. A boundary-aware loss, a Tversky/FP-weighted loss, or another
+threshold sweep would all target a systematic error that no longer exists. The
+binding constraint is annotation quality, not the objective.
+
+**Re-measure before acting on any recorded empirical claim.** Two stale
+conclusions were found in one session (the over-segmentation above, and
+`calibrate_optic_disc_thresholds.py`'s "threshold tuning doesn't transfer" verdict,
+which still reads REFUGE2's *old domain-split* folders and whose confound the
+pooled re-split already removed). Both were true when written. A retrain
+invalidates every empirical comment about the model — treat them as hypotheses,
+not facts.
+
 **Beware CAM-based attention metrics in this repo.** Grad-CAM and LayerCAM were
 found to disagree by ~10x, and to *invert* which model looks better, on the same
 model/layer/images — EfficientNet-B0's final CAM grid is 7x7 (one cell = 32x32
