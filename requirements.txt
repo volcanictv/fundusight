@@ -9,24 +9,40 @@
 # exact incident: the deployed app segfaulted specifically after torch
 # finished importing, with import itself taking 10-30s -- much longer than
 # a CPU-only wheel needs, consistent with CUDA driver-stub loading). The
-# extra-index-url below is ADDED alongside PyPI (not `--index-url`, which
-# would replace PyPI outright and break every other dependency in this
-# file), and only supplies +cpu-tagged wheels, so pinning the exact +cpu
-# local version leaves no ambiguity for the resolver to pick the CUDA
-# build instead.
+# HOW the +cpu wheels are sourced matters as much as the pin itself, and this
+# is the SECOND live incident on this line -- do not "simplify" it back to
+# `--extra-index-url`:
 #
-# For local GPU training this flips the old order: this file now installs
-# the CPU build, so install requirements.txt FIRST, then install the CUDA
-# build OVER it for training:
+#   Streamlit Community Cloud switched its installer from pip to `uv`. uv
+#   defaults to a FIRST-INDEX-WINS strategy: an --extra-index-url does not just
+#   add wheels, it CLAIMS PACKAGE NAMES. PyTorch's index mirrors numpy, tqdm and
+#   others, so uv resolved `numpy` against download.pytorch.org (which carries
+#   only up to 2.4.4), never looked at PyPI for 2.5.1, and the whole deploy died
+#   with "no solution found ... numpy==2.5.1". Un-pinning numpy just moves the
+#   failure to tqdm -- it is whack-a-mole, not a fix. The flag that would fix it
+#   (`--index-strategy unsafe-best-match`) is rejected by BOTH pip and uv when
+#   placed in a requirements file, so it is not an option here either.
+#
+#   `--find-links` is the fix: it supplies WHEELS without claiming package
+#   names, so torch/torchvision resolve to the +cpu builds while numpy, tqdm and
+#   everything else still come from PyPI. Verified against both resolvers before
+#   committing: uv (--python-platform linux, py3.12 and 3.13) and pip (win_amd64)
+#   both resolve torch==2.11.0+cpu / torchvision==0.26.0+cpu with ZERO nvidia-*
+#   packages in the resolution -- which is the property that actually prevents
+#   the segfault, so check THAT (not just the pin) if you touch this again.
+#
+# For local GPU training this flips the usual order: this file installs the CPU
+# build, so install requirements.txt FIRST, then install the CUDA build OVER it:
 #   pip install -r requirements.txt
 #   pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-# Re-running `pip install -r requirements.txt` after that reverts back to
-# the CPU build (the pin is now exact, not just the public version), so do
-# that reinstall last, right before training.
---extra-index-url https://download.pytorch.org/whl/cpu
+# Re-running `pip install -r requirements.txt` reverts to the CPU build (the pin
+# is exact, not just the public version), so do that reinstall last, right
+# before training -- and before merging to master.
+--find-links https://download.pytorch.org/whl/cpu/torch/
+--find-links https://download.pytorch.org/whl/cpu/torchvision/
 torch==2.11.0+cpu
 torchvision==0.26.0+cpu
-numpy==2.5.1
+numpy==2.5.0
 pandas==3.0.3
 openpyxl==3.1.5  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
 
