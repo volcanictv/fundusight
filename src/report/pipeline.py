@@ -57,19 +57,35 @@ def _cached_classifier_model(load_fn: Callable, weights_path: str, device: str) 
 
 
 def _run_classifier(
-    image: np.ndarray, weights_path: str, cam_method: str, device: str, load_fn: Callable, predict_fn: Callable
+    image: np.ndarray,
+    weights_path: str,
+    cam_method: str,
+    device: str,
+    load_fn: Callable,
+    predict_fn: Callable,
+    input_fn: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> tuple:
     """Returns (detection, cam_overlay), both None if no checkpoint is
     available at weights_path -- there's no classical fallback for any of
     the three trained classifiers, so this is a stage the rest of the
     pipeline must be able to run without.
+
+    `input_fn` maps the uploaded photo to what the model actually classifies.
+    It exists for the glaucoma model, which is trained on ONH crops rather
+    than full fundus photos (see src/detection/onh_crop.py). Applying it ONCE
+    here, and feeding the result to BOTH predict_fn and generate_cam,
+    guarantees the heatmap explains the same array the prediction came from --
+    running Grad-CAM on the full photo while the model classified a crop would
+    produce a heatmap of an image the model never saw. DR and AMD pass no
+    input_fn and are handed the photo unchanged.
     """
     if not os.path.exists(weights_path):
         return None, None
 
     model = _cached_classifier_model(load_fn, weights_path, device)
-    detection = predict_fn(model, image, device)
-    cam_overlay = generate_cam(model, image, method=cam_method, target_class=detection["class_idx"])
+    model_input = input_fn(image) if input_fn is not None else image
+    detection = predict_fn(model, model_input, device)
+    cam_overlay = generate_cam(model, model_input, method=cam_method, target_class=detection["class_idx"])
     return detection, cam_overlay
 
 
@@ -132,7 +148,13 @@ def run_pipeline(
     _emit("detection", (detection, cam_overlay))
 
     glaucoma, glaucoma_cam_overlay = _run_classifier(
-        image, glaucoma_weights_path, cam_method, device, glaucoma_infer.load_model, glaucoma_infer.predict
+        image,
+        glaucoma_weights_path,
+        cam_method,
+        device,
+        glaucoma_infer.load_model,
+        glaucoma_infer.predict_on_model_input,
+        input_fn=glaucoma_infer.model_input,
     )
     _emit("glaucoma", (glaucoma, glaucoma_cam_overlay))
 

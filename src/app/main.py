@@ -288,6 +288,17 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
         # input (see ROADMAP.md's Phase 6 note), which disc_found alone
         # wouldn't catch.
         st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
+    elif not optic_disc_result["disc_confident"]:
+        # The disc WAS located and segmented -- it just doesn't look like a
+        # disc (see optic_disc.assess_disc_plausibility). This is the case
+        # that used to pass silently: a bright hemorrhage/exudate cluster
+        # gets cropped, segmented, and reported as a perfectly ordinary CDR.
+        warnings = optic_disc_result["disc_localization_warnings"]
+        detail = f" — {warnings[0]}" if warnings else ""
+        st.warning(
+            f"Low-confidence optic disc localization{detail}. The cup/disc measurements above may have been "
+            f"measured from a bright lesion rather than the disc itself — treat the CDR as unreliable."
+        )
 
 
 _MAX_COMPARISON_IMAGES_PER_ROW = 3

@@ -5,6 +5,7 @@ from src.segmentation.optic_disc import (
     DISC_ROI_WIDTH,
     _largest_component_mask,
     _vertical_extent,
+    assess_disc_plausibility,
     clean_disc_cup_masks,
     compute_cdr,
     compute_optic_biomarkers,
@@ -96,6 +97,66 @@ def test_locate_disc_classical_handles_empty_fov():
 
     assert not result["found"]
     assert result["diameter_px"] > 0  # still a usable fallback, never zero/NaN
+    # A disc that couldn't be located at all can't have a trustworthy crop
+    # either -- never report confidence for it.
+    assert not result["confident"]
+    assert result["implausible_reasons"]
+
+
+def test_locate_disc_classical_is_confident_on_a_clean_round_disc():
+    # disc_diameter_frac=0.10 rather than the fixture's 0.14 default: real
+    # optic discs measure ~0.09 of image width (ADAM ground truth, mean
+    # 0.092 / p90 0.116), so the default draws an unrealistically large disc
+    # that the size check correctly rejects. Confidence is only meaningful
+    # against a realistically-proportioned disc.
+    image, _center, _diameter = _fundus_with_disc(VESSEL_WORKING_WIDTH * 2, disc_diameter_frac=0.10, macula=False)
+
+    result = locate_disc_classical(image)
+
+    assert result["found"]
+    assert result["confident"]
+    assert result["implausible_reasons"] == []
+
+
+def test_assess_disc_plausibility_rejects_ragged_blob():
+    # The hemorrhage/exudate case: a blob that won the brightness search but
+    # is nowhere near disc-shaped. On ADAM's ground truth, wrong
+    # localizations average ~0.07 circularity vs ~0.34 for correct ones.
+    geometry = {"diameter_px": 60.0, "circularity": 0.06, "solidity": 0.7, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
+    assert any("disc-shaped" in r for r in result["reasons"])
+
+
+def test_assess_disc_plausibility_rejects_oversized_blob():
+    # Wrong crops are systematically LARGER than real discs (a confluent
+    # exudate/hemorrhage patch outgrows a disc) -- the size cap catches the
+    # one ragged-blob case circularity alone misses.
+    geometry = {"diameter_px": 120.0, "circularity": 0.9, "solidity": 0.95, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
+    assert any("implausible size" in r for r in result["reasons"])
+
+
+def test_assess_disc_plausibility_accepts_a_real_looking_disc():
+    geometry = {"diameter_px": 60.0, "circularity": 0.4, "solidity": 0.9, "measured": True}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert result["plausible"]
+    assert result["reasons"] == []
+
+
+def test_assess_disc_plausibility_treats_unmeasurable_shape_as_not_confident():
+    geometry = {"diameter_px": 60.0, "circularity": float("nan"), "solidity": float("nan"), "measured": False}
+
+    result = assess_disc_plausibility(geometry, expected_diameter=60.0, image_width=600)
+
+    assert not result["plausible"]
 
 
 def test_crop_disc_roi_shape_and_squareness():
@@ -319,6 +380,8 @@ def test_compute_optic_biomarkers_returns_expected_keys_and_shapes():
         "cup_diameter_px",
         "macula_location",
         "disc_found",
+        "disc_confident",
+        "disc_localization_warnings",
         "macula_found",
     }
     assert result["disc_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)

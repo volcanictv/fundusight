@@ -99,6 +99,8 @@ def test_compute_optic_biomarkers_hybrid_returns_same_keys_as_classical():
         "cup_diameter_px",
         "macula_location",
         "disc_found",
+        "disc_confident",
+        "disc_localization_warnings",
         "macula_found",
     }
     assert result["disc_mask"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)

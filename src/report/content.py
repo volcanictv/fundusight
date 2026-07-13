@@ -192,11 +192,13 @@ def _vessel_section(vessels_result: dict, working_image) -> Section:
 
 def _optic_disc_section(optic_disc_result: dict, working_image) -> Section:
     macula = optic_disc_result["macula_location"]
+    confident = optic_disc_result["disc_confident"]
     rows = [
         ("Vertical cup-to-disc ratio", f"{optic_disc_result['vertical_cdr']:.3f}"),
         ("Disc diameter", f"{optic_disc_result['disc_diameter_px']} px"),
         ("Cup diameter", f"{optic_disc_result['cup_diameter_px']} px"),
         ("Disc located", "Yes" if optic_disc_result["disc_found"] else "No"),
+        ("Localization confidence", "OK" if confident else "Low — CDR unreliable"),
         ("Macula located", "Yes" if optic_disc_result["macula_found"] else "No"),
         ("Macula position", f"{macula}" if macula is not None else "Not found"),
     ]
@@ -237,7 +239,28 @@ def _build_recommendation(
     else:
         parts.append(_AMD_RECOMMENDATIONS[amd["class_idx"]])
 
-    cdr_elevated = optic_disc_result["disc_found"] and optic_disc_result["vertical_cdr"] >= _ELEVATED_CDR_THRESHOLD
+    # A CDR is only as trustworthy as the crop it was measured from. Stage
+    # 6.1's classical localizer can land on a large hemorrhage or a dense
+    # exudate cluster instead of the disc (on ADAM's ground truth it does so
+    # on 38/270 images); Stage 6.2 will then happily segment a "disc" and
+    # "cup" out of that wrong crop and Stage 6.3 will report a perfectly
+    # confident-looking ratio measured off the wrong anatomy. So when the
+    # geometric plausibility checks reject the localization, the CDR is
+    # reported as unreliable AND withheld from the elevated-CDR observation
+    # below -- an elevated CDR derived from a hemorrhage is not a finding,
+    # it's an artifact, and stating it would be worse than saying nothing.
+    disc_localized_well = optic_disc_result["disc_found"] and optic_disc_result["disc_confident"]
+    if optic_disc_result["disc_found"] and not optic_disc_result["disc_confident"]:
+        warnings = optic_disc_result["disc_localization_warnings"]
+        detail = f" ({warnings[0]})" if warnings else ""
+        parts.append(
+            f"The optic disc could not be localized with confidence on this "
+            f"image{detail}, so the cup-to-disc ratio above should not be "
+            f"relied on — it may have been measured from a bright lesion "
+            f"rather than the disc itself."
+        )
+
+    cdr_elevated = disc_localized_well and optic_disc_result["vertical_cdr"] >= _ELEVATED_CDR_THRESHOLD
     if cdr_elevated:
         # No repeated "educational observation only, not a diagnosis" here
         # either -- see the module-level comment above _GLAUCOMA_
@@ -254,7 +277,10 @@ def _build_recommendation(
     # explicitly when they point different directions rather than leaving
     # the reader to notice the tension themselves -- both are approximate
     # estimates, neither should silently override the other.
-    if optic_disc_result["disc_found"] and glaucoma is not None:
+    # Gated on disc_localized_well, not just disc_found: a disagreement
+    # between the classifier and a CDR we already know is untrustworthy isn't
+    # a real disagreement worth surfacing, it's just the bad crop talking.
+    if disc_localized_well and glaucoma is not None:
         classifier_flags_glaucoma = glaucoma["class_idx"] == 1
         if cdr_elevated != classifier_flags_glaucoma:
             parts.append(

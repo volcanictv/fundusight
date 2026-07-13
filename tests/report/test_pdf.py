@@ -57,6 +57,8 @@ def _minimal_pipeline_result():
             "cup_diameter_px": 8,
             "macula_location": (30, 30),
             "disc_found": True,
+            "disc_confident": True,
+            "disc_localization_warnings": [],
             "macula_found": True,
         },
         "working_image": image,

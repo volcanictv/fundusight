@@ -113,6 +113,8 @@ def compute_optic_biomarkers_hybrid(image: np.ndarray, model: torch.nn.Module, d
         "cup_diameter_px": cdr_info["cup_diameter_px"],
         "macula_location": macula_info["location_xy"],
         "disc_found": disc_info["found"],
+        "disc_confident": disc_info["confident"],
+        "disc_localization_warnings": disc_info["implausible_reasons"],
         "macula_found": macula_info["found"],
     }
 

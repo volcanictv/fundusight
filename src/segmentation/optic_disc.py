@@ -67,6 +67,42 @@ _EXPECTED_DISC_DIAMETER_FRACTION = 0.12
 _DIAMETER_REFINEMENT_MIN_FACTOR = 0.4
 _DIAMETER_REFINEMENT_MAX_FACTOR = 2.5
 
+# Geometric plausibility thresholds for the located disc candidate (see
+# assess_disc_plausibility). The brightness-window peak in
+# locate_disc_classical() answers "where is the brightest disc-sized patch",
+# which is NOT the same question as "is that patch actually a disc" -- a
+# large hemorrhage or a dense exudate cluster can win the brightness search
+# outright. These checks test the candidate blob's SHAPE instead of its
+# brightness, which is the one property the confusers don't share with a
+# real optic disc: the disc is a compact, near-circular, solid blob of a
+# fairly predictable size, while exudate clusters are scattered/ragged and
+# hemorrhages are irregular.
+#
+# Calibrated (not guessed) against ADAM's 270 annotated ground-truth
+# Disc_Masks -- see scripts/evaluate_disc_localization.py and DEEP_DIVE.md.
+# At these values the checks flag 38/38 (100%) of the localizations that
+# actually land outside the true disc, at the cost of flagging 47/232
+# (20.3%) of correct ones. That asymmetry is deliberate: a false alarm just
+# annotates the CDR as low-confidence, while a miss silently reports a CDR
+# measured off the wrong anatomy, which is the failure this exists to stop.
+#
+# Circularity is by far the strongest single cue (AUC 0.945 separating
+# correct from incorrect localizations) and catches 37 of the 38; the size
+# cap catches 23 and, crucially, the one circularity misses. Note the size
+# check earns its keep in the MAX direction, not the min: wrong crops are
+# systematically LARGER than real discs (a hemorrhage or confluent exudate
+# patch outgrows a disc), which is the opposite of the intuition that a
+# spurious blob would be small.
+#
+# Solidity is measured and returned as a diagnostic but is deliberately NOT
+# a gate: on this data it is entirely redundant with the two below (adding a
+# solidity gate at any threshold from 0.60-0.75 changed neither the 38
+# caught nor the 47 false alarms), so gating on it would be dead weight that
+# only looks like extra rigor.
+_MIN_DISC_CIRCULARITY = 0.19
+_MIN_DISC_DIAMETER_FRACTION = 0.04
+_MAX_DISC_DIAMETER_FRACTION = 0.12
+
 # How far from the disc center (in multiples of disc diameter) to search
 # for the macula/fovea -- clinically the macula sits roughly 2-2.5 disc
 # diameters temporal to the disc. Searched on BOTH sides of the disc along
@@ -94,6 +130,25 @@ def _largest_component_mask(binary: np.ndarray) -> np.ndarray:
     return labeled == counts.argmax()
 
 
+def _unlocated_disc(center_xy: tuple, expected_diameter: float, reason: str) -> dict:
+    """The degenerate-image return for locate_disc_classical(): a fallback
+    center/diameter so callers never crash, with found=False. Never confident
+    -- if the disc couldn't be located at all, its crop can't be trusted
+    either, so this shares the same "confident" contract as a candidate that
+    was located but failed the geometric checks.
+    """
+    return {
+        "center_xy": center_xy,
+        "diameter_px": float(expected_diameter),
+        "found": False,
+        "confident": False,
+        "circularity": float("nan"),
+        "solidity": float("nan"),
+        "diameter_fraction": float("nan"),
+        "implausible_reasons": [reason],
+    }
+
+
 def locate_disc_classical(image: np.ndarray) -> dict:
     """Locate the optic disc as the center of the brightest disc-sized
     *compact* patch within the field of view -- found via the average
@@ -117,11 +172,23 @@ def locate_disc_classical(image: np.ndarray) -> dict:
     or an already-working-resolution one, since resizing to the same size
     is a no-op.
 
-    Returns {"center_xy": (x, y), "diameter_px": float, "found": bool} in
+    Brightness alone is not enough to be sure the patch found IS the disc,
+    so the candidate's geometry is then checked (assess_disc_plausibility()):
+    "confident"=False flags a candidate whose shape doesn't look like a disc
+    (most importantly, a large hemorrhage or dense exudate cluster that won
+    the brightness search) so downstream stages can degrade rather than
+    silently compute a CDR from the wrong anatomy.
+
+    Returns {"center_xy": (x, y), "diameter_px": float, "found": bool,
+    "confident": bool, "circularity": float, "solidity": float,
+    "diameter_fraction": float, "implausible_reasons": [str, ...]} in
     working-image coordinates. "found"=False (with a fallback center/
     diameter estimate so callers never crash on a degenerate image, e.g. a
     synthetic test image or a photo with no visible disc) means no FOV --
-    or no brightness variation at all -- was found to search within.
+    or no brightness variation at all -- was found to search within; the
+    shape metrics are NaN in that case. found=True with confident=False is
+    the interesting one: a disc-sized bright patch WAS found, it just doesn't
+    look like a disc.
     """
     working = vessels._resize_to_working_width(image)
     green = vessels.extract_vessel_channel(working)
@@ -130,12 +197,12 @@ def locate_disc_classical(image: np.ndarray) -> dict:
     expected_diameter = w * _EXPECTED_DISC_DIAMETER_FRACTION
 
     if not fov.any():
-        return {"center_xy": (w / 2.0, h / 2.0), "diameter_px": expected_diameter, "found": False}
+        return _unlocated_disc((w / 2.0, h / 2.0), expected_diameter, "no field of view found")
 
     fov_pixels = green[fov]
     if fov_pixels.min() == fov_pixels.max():
         ys, xs = np.nonzero(fov)
-        return {"center_xy": (float(xs.mean()), float(ys.mean())), "diameter_px": expected_diameter, "found": False}
+        return _unlocated_disc((float(xs.mean()), float(ys.mean())), expected_diameter, "no brightness variation in field of view")
 
     window_size = max(int(expected_diameter), 3)
     windowed_brightness = cv2.boxFilter(green.astype(np.float32), ddepth=-1, ksize=(window_size, window_size))
@@ -143,19 +210,63 @@ def locate_disc_classical(image: np.ndarray) -> dict:
     peak_y, peak_x = np.unravel_index(np.argmax(candidate), candidate.shape)
     center_xy = (float(peak_x), float(peak_y))
 
-    diameter_px = _refine_disc_diameter(green, fov, center_xy, expected_diameter)
-    return {"center_xy": center_xy, "diameter_px": diameter_px, "found": True}
+    geometry = _disc_candidate_geometry(green, fov, center_xy, expected_diameter)
+    plausibility = assess_disc_plausibility(geometry, expected_diameter, image_width=w)
+
+    diameter_px = geometry["diameter_px"] if geometry["measured"] else expected_diameter
+    in_range = (
+        _DIAMETER_REFINEMENT_MIN_FACTOR * expected_diameter
+        <= diameter_px
+        <= _DIAMETER_REFINEMENT_MAX_FACTOR * expected_diameter
+    )
+    if not in_range:
+        diameter_px = expected_diameter
+
+    return {
+        "center_xy": center_xy,
+        "diameter_px": float(diameter_px),
+        "found": True,
+        "confident": plausibility["plausible"],
+        "circularity": geometry["circularity"],
+        "solidity": geometry["solidity"],
+        "diameter_fraction": geometry["diameter_px"] / w if geometry["measured"] else float("nan"),
+        "implausible_reasons": plausibility["reasons"],
+    }
 
 
-def _refine_disc_diameter(green: np.ndarray, fov: np.ndarray, center_xy: tuple, expected_diameter: float) -> float:
-    """Refine the expected-diameter prior using Otsu + largest-connected-
-    component within a small window CENTERED ON THE ALREADY-FOUND peak,
-    rather than across the whole image -- local enough that a distant
-    lesion cluster or the far side of an illumination gradient can't reach
-    in and distort it, unlike the same technique applied globally. The
-    result is still clamped to a sane multiple of the expected diameter, in
-    case even this local estimate comes out implausible.
+def _disc_candidate_geometry(green: np.ndarray, fov: np.ndarray, center_xy: tuple, expected_diameter: float) -> dict:
+    """Measure the SHAPE of the bright blob sitting under the brightness-peak
+    candidate center, using Otsu + largest-connected-component within a small
+    window CENTERED ON THE ALREADY-FOUND peak, rather than across the whole
+    image -- local enough that a distant lesion cluster or the far side of an
+    illumination gradient can't reach in and distort it, unlike the same
+    technique applied globally.
+
+    Returns {"diameter_px", "circularity", "solidity", "measured"}.
+    "measured"=False (with NaN shape metrics) means the window was degenerate
+    -- no FOV, no brightness variation, or no blob above the local threshold
+    -- so there is nothing whose shape could be assessed; callers should fall
+    back to the expected-diameter prior and treat the candidate as
+    unverified rather than as verified-implausible.
+
+    Circularity is 4*pi*area / perimeter^2: 1.0 for a perfect circle, falling
+    toward 0 as a blob gets more ragged or elongated. It is the single most
+    discriminative cue here (AUC 0.945 for separating correct from incorrect
+    localizations on ADAM), because a real optic disc is close to circular
+    while the two things that beat it in a pure brightness search -- a
+    hemorrhage and a dense exudate cluster -- are not.
+
+    IMPORTANT, and unintuitive: a correctly-located disc scores only ~0.34
+    here on real photos, not ~0.9. The blob being measured is a raw local
+    Otsu threshold, not a clean disc outline -- vessels cut through it and
+    the threshold leaves a ragged edge, and a ragged edge inflates the
+    perimeter, which circularity squares in the denominator. So the useful
+    reading of this number is RELATIVE (correct ~0.34 vs incorrect ~0.07),
+    and _MIN_DISC_CIRCULARITY is set accordingly low. Anyone "fixing" the
+    threshold up toward a textbook 0.8 would flag essentially every image.
     """
+    unmeasured = {"diameter_px": float(expected_diameter), "circularity": float("nan"), "solidity": float("nan"), "measured": False}
+
     h, w = green.shape[:2]
     cx, cy = center_xy
     half = expected_diameter
@@ -164,19 +275,71 @@ def _refine_disc_diameter(green: np.ndarray, fov: np.ndarray, center_xy: tuple, 
     local, local_fov = green[y0:y1, x0:x1], fov[y0:y1, x0:x1]
 
     if local.size == 0 or not local_fov.any():
-        return expected_diameter
+        return unmeasured
     local_pixels = local[local_fov]
     if local_pixels.min() == local_pixels.max():
-        return expected_diameter
+        return unmeasured
 
     local_bright = (local > threshold_otsu(local_pixels)) & local_fov
     component = _largest_component_mask(local_bright)
     if not component.any():
-        return expected_diameter
+        return unmeasured
 
-    candidate_diameter = max(r.equivalent_diameter_area for r in regionprops(label(component)))
-    in_range = _DIAMETER_REFINEMENT_MIN_FACTOR * expected_diameter <= candidate_diameter <= _DIAMETER_REFINEMENT_MAX_FACTOR * expected_diameter
-    return float(candidate_diameter) if in_range else expected_diameter
+    region = max(regionprops(label(component)), key=lambda r: r.area)
+    perimeter = region.perimeter
+    if perimeter <= 0:
+        return unmeasured
+
+    # A pixelated blob's perimeter estimate is slightly biased, which can push
+    # circularity marginally above 1.0 for a very small near-perfect circle --
+    # clamp so downstream comparisons stay on a well-defined [0, 1] scale.
+    circularity = min(4.0 * np.pi * region.area / (perimeter**2), 1.0)
+
+    return {
+        "diameter_px": float(region.equivalent_diameter_area),
+        "circularity": float(circularity),
+        "solidity": float(region.solidity),
+        "measured": True,
+    }
+
+
+def assess_disc_plausibility(geometry: dict, expected_diameter: float, image_width: int) -> dict:
+    """Decide whether a located disc candidate is geometrically plausible as
+    an actual optic disc, given _disc_candidate_geometry()'s shape metrics.
+
+    This exists because locate_disc_classical()'s brightness search answers
+    "where is the brightest disc-sized patch in the field of view" -- which
+    is a strictly weaker question than "where is the optic disc". On a fundus
+    photo with a large hemorrhage or a dense exudate cluster, the brightest
+    disc-sized patch can be the lesion, not the disc, and nothing downstream
+    would notice: crop_disc_roi() would happily crop around the lesion, the
+    Stage 6.2 U-Net would segment *something* disc-shaped out of whatever it
+    was handed, and compute_cdr() would report a confident-looking CDR
+    computed from the wrong anatomy entirely. A wrong crop must not silently
+    produce a wrong CDR, so the shape checks here give callers a signal to
+    degrade on.
+
+    Returns {"plausible": bool, "reasons": [str, ...]} -- `reasons` is empty
+    when plausible, and otherwise names each failed check, so a caller (or a
+    report) can say *why* localization is low-confidence rather than just
+    that it is.
+    """
+    if not geometry["measured"]:
+        return {"plausible": False, "reasons": ["shape not measurable (degenerate window)"]}
+
+    reasons = []
+    circularity = geometry["circularity"]
+    diameter_fraction = geometry["diameter_px"] / image_width if image_width > 0 else 0.0
+
+    if circularity < _MIN_DISC_CIRCULARITY:
+        reasons.append(f"not disc-shaped (circularity {circularity:.2f} < {_MIN_DISC_CIRCULARITY})")
+    if not (_MIN_DISC_DIAMETER_FRACTION <= diameter_fraction <= _MAX_DISC_DIAMETER_FRACTION):
+        reasons.append(
+            f"implausible size (diameter {diameter_fraction:.3f} of image width, "
+            f"expected {_MIN_DISC_DIAMETER_FRACTION}-{_MAX_DISC_DIAMETER_FRACTION})"
+        )
+
+    return {"plausible": not reasons, "reasons": reasons}
 
 
 def crop_disc_roi(working_image: np.ndarray, center_xy: tuple, diameter_px: float, roi_width: int = DISC_ROI_WIDTH) -> tuple:
@@ -469,5 +632,7 @@ def compute_optic_biomarkers(image: np.ndarray) -> dict:
         "cup_diameter_px": cdr_info["cup_diameter_px"],
         "macula_location": macula_info["location_xy"],
         "disc_found": disc_info["found"],
+        "disc_confident": disc_info["confident"],
+        "disc_localization_warnings": disc_info["implausible_reasons"],
         "macula_found": macula_info["found"],
     }
