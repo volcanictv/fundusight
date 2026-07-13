@@ -17,7 +17,15 @@ import os
 import requests
 
 DEFAULT_REPO = "volcanictv/fundusight"
-DEFAULT_TAG = "v1.0.0"
+# v1.1.0 ships the ONH-cropped glaucoma checkpoint (2026-07-13). The tag bump
+# is NOT cosmetic and must not be reverted independently of the code: that
+# checkpoint classifies an optic-nerve-head CROP, while v1.0.0's classified a
+# full fundus photo. Pairing v1.1.0's weights with pre-fix inference code (or
+# vice versa) feeds the model an image of a kind it never trained on -- a
+# silent train/inference mismatch that yields confident, meaningless glaucoma
+# probabilities rather than an error. Weights and code ship together; see
+# src/detection/onh_crop.py.
+DEFAULT_TAG = "v1.1.0"
 
 # Matches src/detection/infer.py, glaucoma_infer.py, amd_infer.py, and
 # src/segmentation/vessel_infer.py, optic_disc_infer.py's DEFAULT_WEIGHTS_PATH
