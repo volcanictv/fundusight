@@ -16,6 +16,32 @@ This README is a snapshot of what's built and what it actually measures.
 `DEEP_DIVE.md` has longer write-ups of specific investigations referenced
 below.
 
+## Screenshots
+
+Patient intake — upload a fundus photo, or try Demo mode against a bundled
+APTOS 2019 sample with no upload needed:
+
+![Patient intake screen](docs/screenshots/intake.png)
+
+Image quality scoring, illumination/CLAHE preprocessing, and the three
+disease-screening tiles (this sample is a real Moderate-NPDR case from the
+demo set — DR and AMD both fire, illustrating the AMD classifier's known
+cross-condition false-positive behavior described below, not a cherry-picked
+clean run):
+
+![Quality, preprocessing, and disease screening overview](docs/screenshots/overview.png)
+
+Full disease-screening breakdown (per-class probability bars) alongside the
+vessel and optic-disc/cup biomarker panels:
+
+![Disease screening detail and biomarkers](docs/screenshots/disease-screening-biomarkers.png)
+
+Grad-CAM explainability compared side-by-side with the original image and
+the localized optic disc, plus the synthesized recommendation text that also
+drives the PDF report:
+
+![Grad-CAM comparison and recommendation](docs/screenshots/explainability-recommendation.png)
+
 ## What this project demonstrates
 
 Three findings came out of building this that are more interesting than any
