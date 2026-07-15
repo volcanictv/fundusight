@@ -2,13 +2,20 @@ name: Keep Fundusight Awake
 
 on:
   schedule:
-    - cron: '0 */6 * * *' # Executes automatically every 6 hours
-  workflow_dispatch:      # Allows you to press a button and trigger it manually
+    - cron: '0 */6 * * *'   # every 6 hours
+  workflow_dispatch:          # manual "Run workflow" button
 
 jobs:
   ping-portfolio:
     runs-on: ubuntu-latest
     steps:
-      - name: Send HTTP request to Streamlit Cloud
+      # Ping the Streamlit health endpoint, NOT the app root.
+      # The root ("/") 303-redirects unauthenticated requests into
+      # share.streamlit.io's auth flow (an infinite redirect loop), so a plain
+      # curl to it never returns 200 and never reaches the app. Streamlit's
+      # /healthz endpoint answers 200 directly, bypassing that redirect.
+      - name: Ping Streamlit health endpoint
         run: |
-          curl -s -o /dev/null -w "%{http_code}\n" https://fundusight-main.streamlit.app/ 
+          code=$(curl -s -o /dev/null -w "%{http_code}" https://fundusight-main.streamlit.app/healthz)
+          echo "health endpoint returned HTTP $code"
+          test "$code" = "200"
