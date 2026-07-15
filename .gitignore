@@ -41,6 +41,7 @@ logs/
 # published repo; regenerable / not part of the deliverable)
 CLAUDE.md
 NOTES.md
+ROADMAP.md
 .claude/
 .cursor/
 .aider*

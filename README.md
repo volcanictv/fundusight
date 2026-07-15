@@ -13,8 +13,8 @@ mode" — no upload needed)
 output here should be treated as clinical advice.
 
 This README is a snapshot of what's built and what it actually measures.
-`ROADMAP.md` has the full phase-by-phase build log, and `DEEP_DIVE.md` has
-longer write-ups of specific investigations referenced below.
+`DEEP_DIVE.md` has longer write-ups of specific investigations referenced
+below.
 
 ## What this project demonstrates
 
@@ -85,75 +85,23 @@ flagged in-repo, not silently shipped as if it were reliable.
 | Vessel segmentation | Hybrid: classical Frangi vesselness feeds a small dilated-conv U-Net trained on DRIVE/STARE/CHASE_DB1 (Dice+clDice loss); classical-only is the fallback with no checkpoint | Held-out test Dice 0.663, clDice 0.832 (hybrid). See finding #2 above for the resolution-coupling bug this pipeline has to guard against |
 | Optic disc/cup + CDR | Hybrid: classical ONH localization/crop feeds a U-Net trained on pooled/re-split REFUGE2 (RGB+Lab+HSV channels, CrossEntropy+Dice loss); classical intensity-threshold is the fallback | Network-only held-out test Dice: rim 0.894, cup 0.858 (mean 0.876). Full pipeline (localization + network + postprocessing): Dice rim 0.841, cup 0.815, mean absolute CDR error 0.057. See finding #1 above for the domain-split bug this result depends on |
 | Macula/fovea | Classical heuristic only (no dataset used here ships fovea labels at training volume) | Validated against ADAM ground truth: median error 3.3 disc diameters, root cause = coin-flip eye-laterality guessing (57% correct). Known-unreliable outside REFUGE2-like framing — see "What this project demonstrates" above |
-| Glaucoma detection | EfficientNet-B0 fine-tuned on pooled REFUGE2 + SMDG-19 glaucoma labels, classifying an **optic-nerve-head crop** (not the full photo) so attention stays on the disc rather than edge/hemorrhage artifacts | Held-out test (n=150, 18 positives): accuracy 86.7%, AUC 0.827, F1 0.444, sensitivity 44.4%, specificity 92.4%. The small positive count makes threshold-0.5 point metrics noisy — AUC (ranking) is the more stable signal here; see `ROADMAP.md`/`DEEP_DIVE.md` for the ONH-crop attention fix this row depends on |
+| Glaucoma detection | EfficientNet-B0 fine-tuned on pooled REFUGE2 + SMDG-19 glaucoma labels, classifying an **optic-nerve-head crop** (not the full photo) so attention stays on the disc rather than edge/hemorrhage artifacts | Held-out test (n=150, 18 positives): accuracy 86.7%, AUC 0.827, F1 0.444, sensitivity 44.4%, specificity 92.4%. The small positive count makes threshold-0.5 point metrics noisy — AUC (ranking) is the more stable signal here; see `DEEP_DIVE.md` for the ONH-crop attention fix this row depends on |
 | AMD detection | EfficientNet-B0 fine-tuned on ADAM (AMD vs Non-AMD) | Held-out test: accuracy 91.7%, AUC 0.889, F1 0.800, sensitivity 76.9%, specificity 95.7% |
 | Report generation | ReportLab PDF, driven by one shared `ReportContent` model | Patient ID, quality score, all three disease probabilities, vessel/CDR measurements, Grad-CAM thumbnails, recommendation text (including a disagreement flag when the CDR-based glaucoma signal and the glaucoma classifier disagree) |
 | Dashboard | Streamlit + Plotly | Upload or demo mode → quality → preprocessing preview → detection+Grad-CAM → biomarkers → in-app report preview → PDF download |
 
-All metrics above are held-out test-set results, reported alongside their
-training/validation numbers in `ROADMAP.md` — not cherry-picked from
+All metrics above are held-out test-set results, not cherry-picked from
 validation.
-
-## Setup
-
-0. Clone the repo:
-   ```
-   git clone https://github.com/volcanictv/fundusight.git
-   cd fundusight
-   ```
-1. Python 3.10+
-   ```
-   python -m venv .venv
-   source .venv/bin/activate   # Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-2. Get a free Kaggle account and download the [APTOS 2019 Blindness Detection](https://www.kaggle.com/c/aptos2019-blindness-detection) dataset into `APTOS 2019/` at the repo root, with `train_1.csv`/`valid.csv`/`test.csv` and matching `train_images/`/`val_images/`/`test_images/` folders (not committed to git — see `.gitignore`).
-3. For the hybrid vessel segmentation model, download DRIVE, STARE, and
-   CHASE_DB1 into `DRIVE/`, `STARE/`, and `CHASE_DB1/` at the repo root
-   (also not committed to git). Expected layout:
-   - `DRIVE/training/images/*.tif` + `DRIVE/training/1st_manual/*.gif`
-     (the `DRIVE/test/` split has no vessel ground truth in the standard
-     download, so it isn't used for training).
-   - `STARE/stare-images/*.ppm.gz` + `STARE/labels-ah/*.ppm.gz` (loaded
-     directly from the gzip-compressed originals — no manual decompression
-     needed).
-   - `CHASE_DB1/Images/*.jpg` + `CHASE_DB1/Masks/*_1stHO.png`.
-4. For the hybrid optic disc/cup segmentation model, download REFUGE2 into
-   `REFUGE2/` at the repo root (also not committed to git). Expected
-   layout: `REFUGE2/{train,val,test}/images/*.jpg` +
-   `REFUGE2/{train,val,test}/mask/*.bmp` (train/test) or `*.png` (val).
-   Masks use pixel values `{0=cup, 128=disc rim, 255=background}`; REFUGE2
-   ships no fovea/macula coordinate labels, so macula localization stays a
-   classical heuristic (see "What this project demonstrates" above).
-5. For the glaucoma classifier, also download SMDG-19 ("SMDG, A
-   Standardized Fundus Glaucoma Dataset") to the repo root, then generate
-   merged labels:
-   ```
-   .venv\Scripts\python.exe scripts\build_glaucoma_labels.py
-   ```
-6. For the AMD classifier, download ADAM (iChallenge-AMD) into `ADAM/` at
-   the repo root — labels come directly from its `Training400/AMD/` vs
-   `Training400/Non-AMD/` folder structure, no separate CSV needed.
-7. For cross-dataset DR validation, download IDRiD into `data/IDRi/`.
-8. For model training: install the CUDA build of torch/torchvision on a
-   local NVIDIA GPU machine (see the comment at the top of
-   `requirements.txt`) and run `src/detection/train.py` /
-   `src/detection/glaucoma_train.py` / `src/detection/amd_train.py` /
-   `src/segmentation/vessel_train.py` /
-   `src/segmentation/optic_disc_train.py` directly. Training on CPU is not
-   practical.
 
 ## Trained weights
 
 Checkpoints are gitignored (large binary files, regenerable). Regenerate
-any of them locally with the training scripts below, or see "Deployment"
-below for how a deployed instance fetches pre-trained weights instead of
-retraining from scratch.
+any of them locally with the training scripts below.
 
 | Checkpoint | Regenerate with | Held-out test result |
 |---|---|---|
 | `checkpoints/dr_efficientnet_b0.pth` | `src\detection\train.py --epochs 15` | accuracy 83.9%, AUC 0.925, kappa 0.889 |
-| `checkpoints/glaucoma_efficientnet_b0.pth` | `src\detection\glaucoma_train.py --epochs 30` | accuracy 74.0%, AUC 0.830, F1 0.418 |
+| `checkpoints/glaucoma_efficientnet_b0.pth` | `src\detection\glaucoma_train.py --epochs 30` | accuracy 86.7%, AUC 0.827, F1 0.444 |
 | `checkpoints/amd_efficientnet_b0.pth` | `src\detection\amd_train.py --epochs 30` | accuracy 91.7%, AUC 0.889, F1 0.800 |
 | `checkpoints/vessel_unet.pth` | `src\segmentation\vessel_train.py --epochs 150` | Dice 0.663, clDice 0.832 |
 | `checkpoints/optic_disc_unet.pth` | `src\segmentation\optic_disc_train.py --epochs 80` | dice_rim 0.894, dice_cup 0.858 |
@@ -162,80 +110,13 @@ Without a given checkpoint, vessel and optic-disc/cup biomarkers fall back
 to their classical pipelines automatically; DR/glaucoma/AMD detection have
 no classical fallback and simply don't appear in the report/app.
 
-## Deployment
-
-This is meant to be deployed once, as a live portfolio demo, via [Streamlit
-Community Cloud](https://share.streamlit.io), which builds an app straight
-from a GitHub repository URL — no separate server or hosting account to
-manage. This repo's own instance is live at
-https://fundusight-main.streamlit.app/. Since checkpoints are never
-committed to git (see "Trained weights" above), a fresh deploy starts with
-none locally; the app fetches them itself from this repo's GitHub Releases
-assets.
-
-**How the checkpoint fetch works:** `src/app/main.py` calls
-`fetch_checkpoints()` (`src/app/checkpoints.py`) once per process on
-startup, which downloads the five checkpoints inference needs into
-`checkpoints/` — existing local files are never re-fetched, so a dev
-machine that already trained its own checkpoints makes zero network calls.
-A failed fetch (offline, release not published yet) degrades the same way a
-missing checkpoint always has — the affected section falls back or
-disappears, not a crash.
-
-**Steps to deploy this repo yourself, end to end:**
-
-1. Push the repo to GitHub (already done here:
-   `https://github.com/volcanictv/fundusight`).
-2. Publish trained checkpoints as GitHub Release assets — this is what step
-   "1" above downloads from. The tag must match `DEFAULT_TAG` in
-   `src/app/checkpoints.py` (currently `v1.1.0`):
-   ```
-   gh release create v1.1.0 checkpoints/dr_efficientnet_b0.pth \
-       checkpoints/glaucoma_efficientnet_b0.pth checkpoints/amd_efficientnet_b0.pth \
-       checkpoints/vessel_unet.pth checkpoints/optic_disc_unet.pth \
-       --title "v1.1.0" --notes "Fundusight v1.1.0 trained checkpoints (ONH-cropped glaucoma)"
-   ```
-   (Requires the [`gh` CLI](https://cli.github.com/), logged in, run from
-   the repo root with the checkpoints present locally.)
-
-   **When you retrain a checkpoint, cut a NEW tag and bump `DEFAULT_TAG` in
-   the same commit — never overwrite an already-published asset.** The live
-   app fetches from whatever tag the deployed branch's code names, so
-   clobbering an asset swaps the weights out from under code that is still
-   running. v1.1.0's glaucoma checkpoint classifies an *optic-nerve-head
-   crop*; v1.0.0's classified a *full fundus photo*. Feeding either one the
-   other's input produces confident, meaningless probabilities rather than a
-   visible error — see `src/detection/onh_crop.py`.
-3. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with
-   GitHub.
-4. Click **"New app"** and point it at this repo by URL:
-   - **Repository:** `volcanictv/fundusight`
-   - **Branch:** `master`
-   - **Main file path:** `src/app/main.py`
-5. Click **"Deploy"**. Streamlit Cloud clones the repo from that GitHub
-   URL, installs `requirements.txt`, and runs the app; on first load it
-   fetches the five checkpoints from the GitHub Release created in step 2
-   automatically — nothing to configure by hand beyond the repo URL itself.
-
-To pre-fetch checkpoints outside the app (e.g. to test the fetch locally
-before deploying) instead of relying on the app's own startup fetch:
-```
-.venv\Scripts\python.exe scripts\fetch_checkpoints.py
-```
-
-GitHub Releases was chosen over Hugging Face Hub for hosting the
-checkpoints: the repo already lives on GitHub, every checkpoint here is
-well under GitHub's 2GB per-asset limit, and it avoids adding a second
-hosting account/dependency for five files.
-
 ## Running the app
 
 ```
 .venv\Scripts\python.exe -m streamlit run src\app\main.py
 ```
 Opens the Streamlit dashboard. Upload a fundus photo, or turn on "Demo
-mode" to try it against a locally available APTOS 2019 sample instead —
-demo mode needs that dataset already downloaded per setup step 2 above.
+mode" to try it against a locally available APTOS 2019 sample instead.
 
 ## Running tests
 
@@ -256,6 +137,6 @@ src/
   segmentation/    vessel biomarkers + optic disc/cup localization & CDR
   report/          PDF report generation + shared content model
   app/             Streamlit dashboard
-data/              not committed — see dataset download instructions above
+data/              not committed — datasets are downloaded locally, gitignored
 tests/             unit tests, mirrors src/ structure
 ```

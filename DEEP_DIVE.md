@@ -1,11 +1,10 @@
 # Deep Dive
 
-`ROADMAP.md` has the "what got built + headline numbers" version, phase by
-phase. This file is where I dump the longer write-ups: the investigations that
-turned up something I didn't want to lose in a one-line roadmap bullet. A
-validation result, a failure mode that fooled me for a while, a root-cause I
-had to chase down. Everything's dated and points at the script that produced
-the numbers, so future-me can re-run it instead of taking my word for it.
+This file is where I dump the longer write-ups: the investigations that turned
+up something I didn't want to lose in a one-line note. A validation result, a
+failure mode that fooled me for a while, a root-cause I had to chase down.
+Everything's dated and points at the script that produced the numbers, so
+future-me can re-run it instead of taking my word for it.
 
 Reverse-chronological-ish, most of it Phase 6/7.
 
@@ -387,7 +386,7 @@ written up as "the CDR got more accurate" — it did not, on any evidence I have
 
 (A dataset with both severe pathology and cup annotation — RIGA's 6-annotator
 disc+cup contours are the obvious candidate, already downloaded — would close
-this gap. See the RIGA notes in ROADMAP.md.)
+this gap.)
 
 ### Known thin margin, leaving it documented rather than tidied away
 
@@ -865,8 +864,6 @@ needs either fovea-localization good enough to crop on (absent right now) or
 lesion-level labels for ADAM. Until one of those exists this is a documented
 limitation, not a queued fix.
 
-See `ROADMAP.md`'s Phase 7 section for the short version.
-
 ## Phase 6 — Classical disc localizer accepts hemorrhages as discs (2026-07-13)
 
 Short version: confirmed against ADAM's ground-truth disc masks. Stage 6.1 lands
@@ -1059,6 +1056,3 @@ run once as a validation set here, is thin for that). Practical takeaway: treat
 macula location from this pipeline as an approximate overlay, not a reliable
 coordinate, and flag it explicitly if it's ever surfaced as more than that in the
 report or app.
-
-See `ROADMAP.md`'s Phase 6 section for the shorter version of this alongside the
-rest of Phase 6's history.
