@@ -78,6 +78,17 @@ _MIN_VESSEL_OBJECT_SIZE = 500
 _MIN_TORTUOSITY_COMPONENT_SIZE = 5
 
 
+# A real fundus photo is roughly square (FOV is a disc); its height never
+# meaningfully exceeds its width. An extreme tall-narrow input (e.g. a 1024x64
+# screenshot) would otherwise scale to VESSEL_WORKING_WIDTH *width* while its
+# height explodes proportionally (1024x64 -> 1400x22400 = 31 MP), and the Frangi
+# filter on that takes minutes -- a hang on the deployed app from a garbage
+# upload. Cap the working height at this multiple of the width: it never triggers
+# for a real photo (aspect < this), and for a pathological input the biomarkers
+# are meaningless anyway (quality assessment already fails such an image).
+_MAX_WORKING_ASPECT = 2.5
+
+
 def _resize_to_working_width(image: np.ndarray) -> np.ndarray:
     """Resize to VESSEL_WORKING_WIDTH, preserving aspect ratio. INTER_AREA is
     the correct choice for shrinking (avoids aliasing thin vessels away);
@@ -87,7 +98,8 @@ def _resize_to_working_width(image: np.ndarray) -> np.ndarray:
     h, w = image.shape[:2]
     scale = VESSEL_WORKING_WIDTH / w
     interpolation = cv2.INTER_AREA if scale < 1 else cv2.INTER_LINEAR
-    return cv2.resize(image, (VESSEL_WORKING_WIDTH, round(h * scale)), interpolation=interpolation)
+    target_h = min(round(h * scale), round(VESSEL_WORKING_WIDTH * _MAX_WORKING_ASPECT))
+    return cv2.resize(image, (VESSEL_WORKING_WIDTH, target_h), interpolation=interpolation)
 
 
 def extract_vessel_channel(image: np.ndarray) -> np.ndarray:

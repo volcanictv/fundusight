@@ -3,6 +3,8 @@ import numpy as np
 
 from src.segmentation.vessels import (
     VESSEL_WORKING_WIDTH,
+    _MAX_WORKING_ASPECT,
+    _resize_to_working_width,
     average_vessel_width,
     branch_point_count,
     compute_biomarkers,
@@ -217,3 +219,18 @@ def test_compute_biomarkers_returns_expected_keys_and_types():
     assert result["skeleton"].shape == (VESSEL_WORKING_WIDTH, VESSEL_WORKING_WIDTH)
     assert result["mask"].dtype == bool
     assert result["skeleton"].dtype == bool
+
+
+def test_resize_to_working_width_caps_extreme_tall_aspect():
+    # Normal ~square image: width hits VESSEL_WORKING_WIDTH, aspect preserved,
+    # cap does NOT trigger.
+    square = _resize_to_working_width(np.zeros((1050, 1050, 3), np.uint8))
+    assert square.shape[1] == VESSEL_WORKING_WIDTH
+    assert square.shape[0] == VESSEL_WORKING_WIDTH  # unchanged by the cap
+
+    # Pathological tall-narrow input: without the cap this would explode to
+    # 1400x22400 (31 MP) and hang the Frangi filter. Height must be capped.
+    tall = _resize_to_working_width(np.zeros((1024, 64, 3), np.uint8))
+    assert tall.shape[1] == VESSEL_WORKING_WIDTH
+    assert tall.shape[0] <= round(VESSEL_WORKING_WIDTH * _MAX_WORKING_ASPECT)
+    assert tall.shape[0] * tall.shape[1] < 6_000_000  # bounded, not 31 MP
