@@ -27,6 +27,7 @@ import torch
 from src.detection import amd_infer, glaucoma_infer
 from src.detection.infer import DEFAULT_WEIGHTS_PATH as DETECTION_DEFAULT_WEIGHTS_PATH
 from src.detection.infer import load_model, predict
+from src.detection.mc_dropout import DEFAULT_MC_SAMPLES
 from src.explainability.gradcam import generate_cam
 from src.preprocessing.enhance import preprocess
 from src.preprocessing.quality import assess_quality
@@ -64,6 +65,7 @@ def _run_classifier(
     load_fn: Callable,
     predict_fn: Callable,
     input_fn: Callable[[np.ndarray], np.ndarray] | None = None,
+    mc_samples: int = DEFAULT_MC_SAMPLES,
 ) -> tuple:
     """Returns (detection, cam_overlay), both None if no checkpoint is
     available at weights_path -- there's no classical fallback for any of
@@ -84,7 +86,7 @@ def _run_classifier(
 
     model = _cached_classifier_model(load_fn, weights_path, device)
     model_input = input_fn(image) if input_fn is not None else image
-    detection = predict_fn(model, model_input, device)
+    detection = predict_fn(model, model_input, device, mc_samples=mc_samples)
     cam_overlay = generate_cam(model, model_input, method=cam_method, target_class=detection["class_idx"])
     return detection, cam_overlay
 

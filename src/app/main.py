@@ -162,6 +162,13 @@ def render_preprocessing_section(preview: dict) -> None:
             st.image(_to_rgb(preview["after"]), caption="Illumination + CLAHE + color norm.", width="stretch")
 
 
+def _uncertainty_subtitle(detection: dict) -> str:
+    """'± 4% (MC-dropout)' for the stat tile when the classifier returned a
+    Monte-Carlo Dropout uncertainty (see mc_dropout.py), else empty."""
+    std = detection.get("uncertainty_std")
+    return f"± {std * 100:.0f}% (MC-dropout)" if std is not None else ""
+
+
 def render_detection_section(detection: dict | None, cam_overlay) -> None:
     if detection is None:
         _unavailable_tile("Diabetic Retinopathy")
@@ -175,6 +182,7 @@ def render_detection_section(detection: dict | None, cam_overlay) -> None:
         f"{detection['probability'] * 100:.0f}%",
         detection["probability"] * 100,
         ring_color=color,
+        subtitle=_uncertainty_subtitle(detection),
     )
     # Always visible (not behind an expander) since the probability
     # distribution is the most informative part of a disease tile. DR is
@@ -205,6 +213,7 @@ def render_glaucoma_section(glaucoma: dict | None, cam_overlay) -> None:
         f"{glaucoma['probability'] * 100:.0f}%",
         glaucoma["probability"] * 100,
         ring_color=color,
+        subtitle=_uncertainty_subtitle(glaucoma),
     )
     # Binary classifiers get a 2-row chart instead of DR's 5-row ordinal
     # one, always visible for the same reason as render_detection_section().
@@ -234,6 +243,7 @@ def render_amd_section(amd: dict | None, cam_overlay) -> None:
         f"{amd['probability'] * 100:.0f}%",
         amd["probability"] * 100,
         ring_color=color,
+        subtitle=_uncertainty_subtitle(amd),
     )
     # staticPlot=True on all three Disease Screening charts (here and in
     # render_detection_section/render_glaucoma_section above): every value

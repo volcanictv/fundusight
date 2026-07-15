@@ -92,14 +92,25 @@ def render_stat_tile(
     ring_value: str,
     ring_pct: float,
     ring_color: str = _DEFAULT_RING_COLOR,
+    subtitle: str = "",
 ) -> None:
     """One dense glass card combining a title, a status pill, and a ring
     gauge. Three of these side by side (see app/main.py's Disease
     Screening panel) form one compact, scannable row for DR/glaucoma/AMD.
+
+    `subtitle`, if given, renders as a small muted line under the ring -- used
+    for the Monte-Carlo Dropout '± x%' uncertainty (see mc_dropout.py).
     """
     if pill_variant not in _PILL_VARIANTS:
         raise ValueError(f"Unknown pill variant: {pill_variant!r}. Choose from {sorted(_PILL_VARIANTS)}")
     pct_clamped = max(0.0, min(100.0, ring_pct))
+    subtitle_html = (
+        f'<div style="text-align:center;margin-top:0.4rem;font-size:0.72rem;'
+        f'letter-spacing:0.02em;opacity:0.6;font-variant-numeric:tabular-nums;">'
+        f"{html.escape(subtitle)}</div>"
+        if subtitle
+        else ""
+    )
     st.markdown(
         f"""<div class="fdx-stat-tile">
     <div class="fdx-stat-tile-header">
@@ -111,6 +122,7 @@ def render_stat_tile(
             <div class="fdx-ring-inner">{html.escape(ring_value)}</div>
         </div>
     </div>
+    {subtitle_html}
 </div>""",
         unsafe_allow_html=True,
     )

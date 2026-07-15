@@ -83,6 +83,18 @@ _AMD_RECOMMENDATIONS = {
 }
 
 
+def _confidence_phrase(detection: dict) -> str:
+    """'87.0% ± 4.2%' when Monte-Carlo Dropout uncertainty is present (see
+    detection/mc_dropout.py), else the plain '87.0% confidence'. The ± figure
+    is the 1-sigma spread of the top class's probability across MC passes -- an
+    approximate (epistemic) uncertainty, not calibrated probability."""
+    pct = detection["probability"] * 100
+    std = detection.get("uncertainty_std")
+    if std is not None:
+        return f"{pct:.1f}% ± {std * 100:.1f}%"
+    return f"{pct:.1f}% confidence"
+
+
 @dataclass
 class Section:
     title: str
@@ -140,7 +152,7 @@ def _detection_sections(detection: dict | None, cam_overlay) -> list[Section]:
         [SEVERITY_LABELS[i], f"{p * 100:.1f}%"]
         for i, p in enumerate(detection["probabilities"])
     ]
-    top_line = f"Top estimate: {detection['label']} ({detection['probability'] * 100:.1f}% confidence)"
+    top_line = f"Top estimate: {detection['label']} ({_confidence_phrase(detection)})"
     sections = [
         Section(title="Diabetic Retinopathy Detection", kind="text", body=top_line),
         Section(title="Severity Probabilities", kind="table", body={"headers": headers, "rows": rows}),
@@ -164,7 +176,7 @@ def _binary_classifier_sections(
 
     headers = ["Finding", "Probability"]
     rows = [[labels[i], f"{p * 100:.1f}%"] for i, p in enumerate(detection["probabilities"])]
-    top_line = f"Top estimate: {detection['label']} ({detection['probability'] * 100:.1f}% confidence)"
+    top_line = f"Top estimate: {detection['label']} ({_confidence_phrase(detection)})"
     sections = [
         Section(title=title, kind="text", body=top_line),
         Section(title=f"{title} Probabilities", kind="table", body={"headers": headers, "rows": rows}),

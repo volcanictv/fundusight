@@ -19,6 +19,7 @@ import numpy as np
 import torch
 
 from src.detection.dataset import build_transforms
+from src.detection.mc_dropout import predicted_class_std
 from src.detection.model import build_model
 from src.detection.onh_crop import crop_to_onh
 
@@ -56,12 +57,16 @@ def model_input(image: np.ndarray) -> np.ndarray:
 
 
 @torch.no_grad()
-def predict_on_model_input(model: torch.nn.Module, onh_crop: np.ndarray, device: str = "cpu") -> dict:
+def predict_on_model_input(
+    model: torch.nn.Module, onh_crop: np.ndarray, device: str = "cpu", mc_samples: int = 0
+) -> dict:
     """predict() for a caller that already holds the ONH crop (see model_input()).
 
     Takes the CROP, not the full photo -- passing a full fundus photo here
     silently classifies an out-of-distribution image. Use predict() unless you
-    specifically need to share one crop across several calls.
+    specifically need to share one crop across several calls. `mc_samples > 0`
+    adds "uncertainty_std" via Monte-Carlo Dropout (see infer.predict /
+    mc_dropout.py).
     """
     rgb = cv2.cvtColor(onh_crop, cv2.COLOR_BGR2RGB)
     transform = build_transforms(train=False)
@@ -71,15 +76,18 @@ def predict_on_model_input(model: torch.nn.Module, onh_crop: np.ndarray, device:
     probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
     class_idx = int(probabilities.argmax())
 
-    return {
+    result = {
         "label": GLAUCOMA_LABELS[class_idx],
         "probability": float(probabilities[class_idx]),
         "probabilities": probabilities.tolist(),
         "class_idx": class_idx,
     }
+    if mc_samples > 0:
+        result["uncertainty_std"] = predicted_class_std(model, tensor, class_idx, mc_samples)
+    return result
 
 
-def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu") -> dict:
+def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu", mc_samples: int = 0) -> dict:
     """Run inference on a single FULL fundus photo, cropping to the ONH first.
 
     `image` is a BGR array as returned by cv2.imread, matching infer.py's
@@ -88,4 +96,4 @@ def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu") -> d
     checkpoint requires is applied here rather than being every caller's
     responsibility to remember.
     """
-    return predict_on_model_input(model, model_input(image), device)
+    return predict_on_model_input(model, model_input(image), device, mc_samples)

@@ -86,7 +86,9 @@ def test_run_pipeline_with_detection_checkpoint_populates_detection(tmp_path):
     )
 
     assert result["detection"] is not None
-    assert set(result["detection"].keys()) == {"label", "probability", "probabilities", "class_idx"}
+    # uncertainty_std: run_pipeline runs MC-Dropout by default (see mc_dropout.py).
+    assert set(result["detection"].keys()) == {"label", "probability", "probabilities", "class_idx", "uncertainty_std"}
+    assert 0.0 <= result["detection"]["uncertainty_std"] <= 1.0
     assert result["cam_overlay"] is not None
 
 
@@ -101,7 +103,7 @@ def test_run_pipeline_with_glaucoma_checkpoint_populates_glaucoma(tmp_path):
     )
 
     assert result["glaucoma"] is not None
-    assert set(result["glaucoma"].keys()) == {"label", "probability", "probabilities", "class_idx"}
+    assert set(result["glaucoma"].keys()) == {"label", "probability", "probabilities", "class_idx", "uncertainty_std"}
     assert result["glaucoma"]["class_idx"] in (0, 1)
     assert result["glaucoma_cam_overlay"] is not None
     assert result["amd"] is None
@@ -118,7 +120,7 @@ def test_run_pipeline_with_amd_checkpoint_populates_amd(tmp_path):
     )
 
     assert result["amd"] is not None
-    assert set(result["amd"].keys()) == {"label", "probability", "probabilities", "class_idx"}
+    assert set(result["amd"].keys()) == {"label", "probability", "probabilities", "class_idx", "uncertainty_std"}
     assert result["amd"]["class_idx"] in (0, 1)
     assert result["amd_cam_overlay"] is not None
     assert result["glaucoma"] is None

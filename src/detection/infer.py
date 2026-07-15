@@ -13,6 +13,7 @@ import numpy as np
 import torch
 
 from src.detection.dataset import build_transforms
+from src.detection.mc_dropout import predicted_class_std
 from src.detection.model import SEVERITY_LABELS, build_model
 
 # Matches train.py's --output default and scripts/demo_infer.py's
@@ -36,11 +37,17 @@ def load_model(weights_path: str, device: str = "cpu") -> torch.nn.Module:
 
 
 @torch.no_grad()
-def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu") -> dict:
+def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu", mc_samples: int = 0) -> dict:
     """Run inference on a single fundus photo.
 
     `image` is a BGR array as returned by cv2.imread, matching quality.py and
     enhance.py's convention elsewhere in this pipeline.
+
+    `mc_samples > 0` additionally runs Monte-Carlo Dropout (see
+    detection/mc_dropout.py) and adds "uncertainty_std" -- the 1-sigma spread of
+    the predicted class's probability across that many stochastic passes. The
+    deterministic point prediction above is left unchanged, so mc_samples=0
+    behaves exactly as before.
     """
     rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     transform = build_transforms(train=False)
@@ -50,9 +57,12 @@ def predict(model: torch.nn.Module, image: np.ndarray, device: str = "cpu") -> d
     probabilities = torch.softmax(logits, dim=1).squeeze(0).cpu().numpy()
     class_idx = int(probabilities.argmax())
 
-    return {
+    result = {
         "label": SEVERITY_LABELS[class_idx],
         "probability": float(probabilities[class_idx]),
         "probabilities": probabilities.tolist(),
         "class_idx": class_idx,
     }
+    if mc_samples > 0:
+        result["uncertainty_std"] = predicted_class_std(model, tensor, class_idx, mc_samples)
+    return result
