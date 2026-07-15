@@ -6,15 +6,14 @@ AI-assisted retinal disease analysis pipeline. Educational/portfolio project —
 
 - Build one vertical slice end-to-end before adding breadth. A working DR-only pipeline beats five half-built disease models.
 - Train on a local NVIDIA GPU via `src/detection/train.py`. Don't try to fine-tune CNNs on a CPU.
-- Use Claude Code with Plan Mode (Shift+Tab) for anything touching more than 2-3 files. Sonnet for implementation, Opus for planning/architecture calls (`/model opusplan`).
-- Commit to git after every working milestone. `/clear` your Claude Code session between unrelated phases.
+- Plan changes that touch more than 2-3 files before diving in.
+- Commit to git after every working milestone.
 - Every phase below ends with something you can run and look at — not just code that compiles.
 
 ---
 
 ## Phase 0 — Setup (few days)
 
-- Install Claude Code, connect it to this repo, read through its basics (`/help`, Plan Mode, `/model`).
 - Set up Python env (3.10+), install `requirements.txt`.
 - Create a free Kaggle account, download APTOS 2019 Blindness Detection dataset.
 

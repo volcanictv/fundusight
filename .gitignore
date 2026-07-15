@@ -36,3 +36,11 @@ outputs/
 # training run logs
 logs/
 *.log
+
+# local-only: AI-assistant tooling + personal working notes (kept out of the
+# published repo; regenerable / not part of the deliverable)
+CLAUDE.md
+NOTES.md
+.claude/
+.cursor/
+.aider*

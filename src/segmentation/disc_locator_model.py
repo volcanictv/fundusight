@@ -22,7 +22,7 @@ tensor can point at it. Running such a head on a full frame instead would be
 out-of-distribution inference: this repo has already been bitten by exactly
 that (the glaucoma classifier trained on full images and fed ONH crops
 returned confident, meaningless probabilities rather than erroring -- see
-src/detection/onh_crop.py and CLAUDE.md). A confident bbox pointing at
+src/detection/onh_crop.py). A confident bbox pointing at
 nothing is strictly worse than an honest `confident=False`, because it
 converts a caught failure back into a silent one.
 

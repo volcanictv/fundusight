@@ -14,9 +14,7 @@ output here should be treated as clinical advice.
 
 This README is a snapshot of what's built and what it actually measures.
 `ROADMAP.md` has the full phase-by-phase build log, and `DEEP_DIVE.md` has
-longer write-ups of specific investigations referenced below. `CLAUDE.md` is
-a dev-history/conventions doc from when this was built with Claude Code —
-useful background, not an active instruction file.
+longer write-ups of specific investigations referenced below.
 
 ## What this project demonstrates
 
@@ -146,10 +144,10 @@ validation.
 
 ## Trained weights
 
-Checkpoints are gitignored (large binary files, regenerable — see
-`CLAUDE.md`). Regenerate any of them locally with the training scripts
-below, or see "Deployment" below for how a deployed instance fetches
-pre-trained weights instead of retraining from scratch.
+Checkpoints are gitignored (large binary files, regenerable). Regenerate
+any of them locally with the training scripts below, or see "Deployment"
+below for how a deployed instance fetches pre-trained weights instead of
+retraining from scratch.
 
 | Checkpoint | Regenerate with | Held-out test result |
 |---|---|---|
@@ -249,4 +247,14 @@ downloaded or hit the network.
 
 ## Project structure
 
-See the "Repo layout" section in `CLAUDE.md`.
+```
+src/
+  preprocessing/   quality assessment, CLAHE, illumination correction
+  detection/       model loading, inference, training; MC-Dropout uncertainty
+  explainability/  Grad-CAM / EigenCAM / LayerCAM wrappers
+  segmentation/    vessel biomarkers + optic disc/cup localization & CDR
+  report/          PDF report generation + shared content model
+  app/             Streamlit dashboard
+data/              not committed — see dataset download instructions above
+tests/             unit tests, mirrors src/ structure
+```

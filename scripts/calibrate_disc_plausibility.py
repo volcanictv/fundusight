@@ -1,10 +1,12 @@
 """Phase 6: THE calibration procedure for Stage 6.1's disc plausibility gate.
 
-Run this whenever `locate_disc_classical()` changes how it picks its candidate.
-CLAUDE.md states that requirement; this script is what makes it actually
-executable, because the previous re-sweep was an ad-hoc, ADAM-only, in-sample
-procedure with no committed artifact -- which is exactly how the gate's headline
-claim went stale without anyone noticing.
+Run this whenever `locate_disc_classical()` changes how it picks its candidate:
+the plausibility thresholds are a property of the localizer's hit/miss
+distribution, not of optic discs, so any change to how the candidate is picked
+requires re-sweeping them. This script is what makes that re-sweep executable,
+because the previous one was an ad-hoc, ADAM-only, in-sample procedure with no
+committed artifact -- which is exactly how the gate's headline claim went stale
+without anyone noticing.
 
 WHAT WENT WRONG BEFORE, and what this script exists to prevent:
 

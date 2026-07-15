@@ -8,10 +8,9 @@ into a renderer-agnostic `ReportContent` -- a flat, ordered list of
 formatting or recommendation text, so the PDF and the in-app preview can
 never visually drift apart in what they say, only in how they say it.
 
-This is also the one place "this isn't a diagnosis" framing lives (see
-CLAUDE.md: generated copy must never imply this is a clinical/diagnostic
-tool) -- every downstream renderer inherits that framing for free just by
-walking these sections.
+This is also the one place "this isn't a diagnosis" framing lives -- generated
+copy must never imply this is a clinical/diagnostic tool, and every downstream
+renderer inherits that framing for free just by walking these sections.
 """
 
 from dataclasses import dataclass, field

@@ -1,7 +1,7 @@
 """Deployment: fetch trained checkpoints from a GitHub Release at runtime.
 
-Checkpoints are gitignored (see CLAUDE.md — trained weights are large and
-never committed), so a fresh clone or a fresh cloud deployment starts with
+Checkpoints are gitignored (trained weights are large and never committed),
+so a fresh clone or a fresh cloud deployment starts with
 none in checkpoints/. `main.py` calls `fetch_checkpoints()` once at startup
 (cached via st.cache_resource so it only runs once per process) to pull the
 five checkpoints inference actually needs from a GitHub Release's attached

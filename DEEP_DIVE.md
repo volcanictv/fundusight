@@ -873,8 +873,8 @@ See `ROADMAP.md`'s Phase 7 section for the short version.
 outside the true disc on 38/270 images, and every one of those used to produce a
 confident-looking CDR. Geometric plausibility checks now catch 38/38.**
 
-> **Re-measured 2026-07-15 (see CLAUDE.md's "Standardized disc-plausibility
-> calibration").** The `38/38` / `0 silent failures` / `~22% false alarms` figures
+> **Re-measured 2026-07-15 (`scripts/calibrate_disc_plausibility.py`).** The
+> `38/38` / `0 silent failures` / `~22% false alarms` figures
 > below are all ADAM **in-sample** — the misses the thresholds were swept against.
 > On a pooled, never-fitted 2219-disc set (ADAM+REFUGE2+RIGA) the shipped gate is
 > **1/53 silent (~2%)** and **~49% false alarms** (up to 88.6% on RIGA
