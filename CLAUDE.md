@@ -56,6 +56,32 @@ changes, both in DEEP_DIVE.md:
    difference of *one patient* out of 18 positives. The retrain is a
    **correctness** fix, not a performance gain.
 
+**Standardized disc-plausibility calibration (2026-07-15).** The plausibility
+gate's headline numbers (`38/38`, **`0 silent failures`**, `~22%` false alarms)
+were all measured on **ADAM in-sample** — the very misses the thresholds were
+swept against. `scripts/calibrate_disc_plausibility.py` re-measures the *shipped*
+gate on a pooled, never-fitted **2219-disc** set (ADAM + REFUGE2 + RIGA; features
+cached at `outputs/disc_plausibility_features.pkl`). Honest held-out reality:
+- **Silent failures: 1/53 wrong crops (~2%)**, not literally 0. Still essentially
+  at-floor, and 1-in-2219 is the *safe* failure direction (it withholds, it does
+  not report a wrong CDR) — the design intent holds. But "zero" was an in-sample
+  artifact; don't quote it as a general property.
+- **False alarms: ~49% pooled** (1057/2166 correct discs get their CDR
+  suppressed), **up to 88.6% on RIGA BinRushed3** — not `~22%`. The gate is far
+  more conservative on non-ADAM cameras than ADAM implied. Correct discs having
+  their CDR withheld ~half the time cross-camera is the real cost, and it is a
+  cost, not a bug (better than a confident wrong CDR).
+- **FOV-relative size normalization does NOT fix portability — tested, rejected.**
+  (This kills the "divide diameter by FOV not frame" idea floated earlier.) The
+  per-dataset median disc size spreads *worse* under FOV (3.13x) than frame
+  (2.43x): apparent disc size varies by camera through true optical magnification,
+  which FOV normalization doesn't capture. A single global size threshold is the
+  wrong instrument whatever it divides by. No refit gate beats production without
+  trading false alarms for *more* silent failures (the refits that cut FA to ~40%
+  push silent to ~10%). **Leave the production gate as-is** — it is a reasonable
+  operating point, and the fix (if ever) is a size prior that is not global, not a
+  different global divisor. Re-measured, not assumed — do the same before acting.
+
 **HARD COUPLING — `locate_disc_classical()` has two downstream dependents that
 break silently if you change it:**
 - The **plausibility thresholds** (`_MIN_DISC_CIRCULARITY` etc.) are calibrated
