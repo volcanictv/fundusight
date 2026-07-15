@@ -1,0 +1,14 @@
+name: Keep Fundusight Awake
+
+on:
+  schedule:
+    - cron: '0 */6 * * *' # Executes automatically every 6 hours
+  workflow_dispatch:      # Allows you to press a button and trigger it manually
+
+jobs:
+  ping-portfolio:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send HTTP request to Streamlit Cloud
+        run: |
+          curl -s -o /dev/null -w "%{http_code}\n" https://fundusight-main.streamlit.app/ 
