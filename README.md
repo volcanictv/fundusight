@@ -73,7 +73,7 @@ either REFUGE2 or ADAM) and gets it right only 57% of the time, barely
 better than chance. See `DEEP_DIVE.md` for the full investigation. This is
 flagged in-repo, not silently shipped as if it were reliable.
 
-## Pipeline stages and real results
+## Pipeline stages and results
 
 | Stage | Approach | Result |
 |---|---|---|
