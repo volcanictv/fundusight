@@ -43,6 +43,7 @@ CLAUDE.md
 NOTES.md
 ROADMAP.md
 .notes.git/
+setup-notes-aliases.sh
 .claude/
 .cursor/
 .aider*
