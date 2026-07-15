@@ -1,39 +1,21 @@
-"""RIGA: recover disc/cup masks from 6-annotator contour OVERLAYS.
+"""RIGA: recover disc/cup masks from 6-annotator contour overlays.
 
-RIGA (BinRushed + Magrabia + MESSIDOR, ~750 fundus photos) is the only dataset
-in this repo carrying BOTH real pathology AND a cup annotation. REFUGE2 has cup
-labels but is a clean glaucoma set; ADAM has pathology but ships disc masks with
-no cup. That gap is why the CDR benefit of the 2026-07-14 localization work is
-currently unmeasurable (see DEEP_DIVE.md). RIGA closes it.
+RIGA (BinRushed + Magrabia + MESSIDOR, ~750 photos) is the only dataset here with
+both real pathology and a cup annotation, which is why it closes the CDR
+measurement gap left by the 2026-07-14 localization work (see DEEP_DIVE.md). Note
+"MESSIDOR" here is RIGA's subset, not the MESSIDOR DR grading dataset -- same name,
+unrelated, no disc/cup labels.
 
-NOTE ON NAMING: "MESSIDOR" here is RIGA's MESSIDOR SUBSET, not the MESSIDOR
-diabetic-retinopathy grading dataset. They share a name and nothing else -- the
-DR one ships no disc/cup labels at all. RIGA is ONE dataset with three sources.
+RIGA ships no mask files: each `imageNprime.tif` has six companions `imageN-1..6`,
+copies of the photo with one ophthalmologist's contours drawn on. Labels are
+recovered by differencing an annotation against its prime, then filling the two
+nested curves (larger = disc, smaller = cup). Anything that doesn't reconstruct to
+exactly two plausible nested components is rejected, not guessed at -- a silently
+wrong label poisons training invisibly. Full method + reconstruction audit in
+DEEP_DIVE.md.
 
-THE LABELS ARE NOT MASKS
-------------------------
-RIGA ships no mask files. For each base image `imageNprime.tif` there are six
-files `imageN-1..6`, each a COPY OF THE PHOTO with that ophthalmologist's disc
-and cup contours drawn on top. The label has to be recovered by differencing an
-annotation against its prime and reconstructing the filled regions:
-
-    diff = |annotation - prime|          -> two thin closed curves
-    label(diff)                          -> exactly 2 components: disc + cup ring
-    fill_holes(each)                     -> two filled disks
-    larger = disc, smaller = cup
-
-This is clean in practice, not a heuristic hedge: the contours are drawn in a
-solid colour with no antialiasing, so the diff is threshold-INSENSITIVE (a cut at
-20, 30 or 50 selects the identical pixel set), and the two curves come out as
-exactly two connected components. Anything that does NOT produce exactly two
-plausible nested components is REJECTED rather than guessed at -- a silently
-mis-reconstructed label is worse than a dropped one, because it poisons training
-invisibly.
-
-Masks are cached in REFUGE2's own raw pixel convention ({0=cup, 128=disc rim,
-255=background}) precisely so that optic_disc_dataset._remap_mask_to_class_indices()
-and OpticDiscDataset consume them with no new loading code, and RIGA pairs can be
-pooled with REFUGE2 pairs directly.
+Masks are cached in REFUGE2's pixel convention ({0=cup, 128=rim, 255=bg}) so they
+pool with REFUGE2 pairs through OpticDiscDataset with no new loading code.
 """
 
 import glob

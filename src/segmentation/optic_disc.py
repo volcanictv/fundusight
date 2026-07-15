@@ -1,33 +1,20 @@
-"""Phase 6: Optic Disc / Cup / Macula Detection.
+"""Optic disc / cup / macula detection (classical CV stages).
 
-Classical CV module -- stays torch-free on purpose, same reasoning as
-vessels.py: `locate_disc_classical()`, `crop_disc_roi()`, `compute_cdr()`,
-and `locate_macula_classical()` here are pure numpy/opencv/skimage, so both
-the classical-only fallback and the hybrid path in `optic_disc_infer.py`
-can call into them without pulling in torch.
+Torch-free on purpose (same as vessels.py) so the classical fallback and the hybrid
+path in optic_disc_infer.py can both call in without pulling in torch. Three stages:
+  6.1 (here): locate the optic nerve head as the largest bright region in the FOV
+      and crop a square ROI around it -- correcting the class imbalance that would
+      otherwise swamp a full-image segmentation. See locate_disc_classical() /
+      crop_disc_roi().
+  6.2 (optic_disc_model.py / optic_disc_infer.py): a trained U-Net segments the ROI
+      into background/rim/cup; segment_disc_cup_classical() here is the
+      no-checkpoint fallback.
+  6.3 (here): compute_cdr() -> vertical cup-to-disc ratio; locate_macula_classical()
+      finds the fovea heuristically (REFUGE2 ships no fovea labels, so it stays
+      unlearned -- and is known unreliable, see DEEP_DIVE.md).
 
-Pipeline (see ROADMAP.md Phase 6 for the three-stage breakdown):
-  Stage 6.1 (this file): locate the optic nerve head (ONH) as the largest
-    bright connected region in the field of view, crop a square region of
-    interest (ROI) around it. This crop is what corrects for class
-    imbalance -- the disc is a small fraction of a full fundus photo, so
-    segmenting it directly on the full image would be dominated by
-    background/easy negatives.
-  Stage 6.2 (optic_disc_model.py / optic_disc_infer.py): a trained U-Net
-    segments the ROI crop into background/disc-rim/cup. This file also
-    provides a classical intensity-threshold fallback for when no trained
-    checkpoint exists (segment_disc_cup_classical()), mirroring
-    vessels.segment_vessels()'s role for the vessel pipeline.
-  Stage 6.3 (this file): compute_cdr() turns disc/cup masks into a
-    vertical cup-to-disc ratio; locate_macula_classical() finds the
-    macula/fovea heuristically, since REFUGE2 (the disc/cup training
-    dataset) ships no fovea coordinate labels -- that part stays unlearned.
-
-Reuses vessels.VESSEL_WORKING_WIDTH / vessels._resize_to_working_width /
-vessels._fov_mask / vessels.extract_vessel_channel directly rather than
-re-deriving resolution-canonicalization or FOV-exclusion logic -- both
-pipelines work on the same kind of fundus photo, so there's no reason for
-a second, independent notion of "canonical resolution."
+Reuses vessels' resolution-canonicalization and FOV helpers rather than re-deriving
+them.
 """
 
 import cv2
@@ -804,7 +791,8 @@ def locate_macula_classical(working_image: np.ndarray, disc_center_xy: tuple, di
     Returns {"location_xy": (x, y) | None, "found": bool} in working-image
     coordinates. REFUGE2 (the Stage 6.2 training dataset) has no fovea
     coordinate labels, so unlike disc/cup segmentation, this stays a
-    classical heuristic rather than a trained model -- see ROADMAP.md.
+    classical heuristic rather than a trained model -- and is known unreliable,
+    see DEEP_DIVE.md.
     """
     h, w = working_image.shape[:2]
     green = vessels.extract_vessel_channel(working_image)

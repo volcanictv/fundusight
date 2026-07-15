@@ -1,34 +1,16 @@
-"""Phase 6 (Stage 6.0): train the coarse full-frame optic disc locator.
-
-Run with (from the project root):
+"""Stage 6.0: train the coarse full-frame optic disc locator.
 
     .venv\\Scripts\\python.exe src\\segmentation\\disc_locator_train.py --epochs 60
 
-Trains DiscLocatorNet to regress the disc bounding box from a downscaled
-WHOLE fundus frame, on REFUGE2's pooled/re-stratified split (the same split
-and seed optic_disc_train.py uses, so the two models never disagree about
-which images are held out). Saves the best checkpoint by validation HIT RATE
-to --output, then evaluates once on the held-out test split.
+Trains DiscLocatorNet on REFUGE2's pooled/re-stratified split (same split + seed as
+optic_disc_train.py, so the two models hold out the same images). Saves the best
+checkpoint, then evaluates once on the held-out test split.
 
-Model selection is on HIT RATE, tie-broken by median center error -- not on
-the regression loss. The loss is a proxy; what the pipeline actually needs
-from this model is a center that lands INSIDE the true disc, since that
-center is what crop_disc_roi() is handed. A model with slightly worse mean L1
-but more centers inside the disc is strictly the better model for this job,
-and selecting on loss would happily pick the other one. This mirrors
-optic_disc_train.py selecting on mean rim/cup Dice rather than on its own loss
-value.
-
-THE TIE-BREAK IS NOT COSMETIC. Validation hit rate SATURATES at 1.000 within
-about five epochs (the val split is in-domain REFUGE2, and a hit is scored
-against the ground-truth BOX, which is generous). A plain `hit_rate > best`
-rule therefore stops saving after the first epoch that reaches 1.0 and locks in
-whatever weights happened to get there first -- even when a later epoch is
-measurably better positioned (observed directly: epoch 5 saved at median error
-0.0260 while epoch 6 reached 0.0219 and was discarded). Selecting on a
-saturated metric is selection by coin flip. Ranking by (hit_rate,
--median_center_error) keeps the metric that matters primary while letting a
-continuous, non-saturating one break the ties it cannot.
+Model selection is on HIT RATE, tie-broken by median center error -- what the
+pipeline needs is a center that lands inside the true disc (that's what
+crop_disc_roi gets), not a low regression loss. The tie-break matters: hit rate
+saturates at 1.000 within ~5 epochs, so selecting on it alone is a coin flip among
+all the epochs that reached it (see DEEP_DIVE.md, "Stage 6.0").
 """
 
 import argparse

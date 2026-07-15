@@ -12,8 +12,8 @@ other or with the underlying inference contracts.
 Only reads the documented dict/array contracts each stage already exposes
 (see e.g. vessel_infer.compute_biomarkers_auto, optic_disc_infer.
 compute_optic_biomarkers_auto) -- never a specific accuracy number or
-checkpoint detail, so swapping in a retrained checkpoint later (see
-ROADMAP.md's Phase 6 note) requires no changes here.
+checkpoint detail, so swapping in a retrained checkpoint later requires no
+changes here.
 """
 
 import datetime

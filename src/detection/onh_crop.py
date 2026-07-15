@@ -1,37 +1,17 @@
-"""Phase 7 (revision): optic-nerve-head cropping for the glaucoma classifier.
+"""Optic-nerve-head cropping for the glaucoma classifier.
 
-Domain-expert review of the full-image glaucoma classifier found it attending
-to edge artifacts and hemorrhages rather than the optic disc. That is a
-plausible shortcut for it to have learned: glaucoma is diagnosed almost
-entirely from the optic nerve head (cup-to-disc ratio, neuroretinal rim
-thinning, RNFL defects), but the classifier was being handed an entire fundus
-photo in which the disc occupies only a few percent of the pixels. Once the
-image is squashed to 224x224 (see dataset.build_transforms), the disc is a
-~25px blob, while a big hemorrhage or a bright edge artifact is large,
-high-contrast, and -- in a dataset where glaucoma prevalence correlates with
-being photographed at a particular site/camera -- potentially predictive
-enough to shortcut on.
+Glaucoma is defined at the optic disc, but the full-image classifier learned to
+shortcut on edge artifacts and hemorrhages instead (domain-expert review; full
+story in DEEP_DIVE.md). Cropping to the ONH before classifying removes that
+option. Reuses Phase 6's Stage 6.1 localizer + ROI crop rather than inventing a
+second notion of "where the disc is".
 
-The fix is to crop to the ONH before classifying, so the model can only look
-at the anatomy the disease is actually defined by. This reuses Phase 6's
-existing Stage 6.1 classical localizer + ROI crop (optic_disc.
-locate_disc_classical / crop_disc_roi) rather than introducing a second,
-independent notion of "where the disc is".
-
-THIS MODULE IS THE SINGLE SHARED DEFINITION of that crop, imported by both
-glaucoma_dataset.py (training) and glaucoma_infer.py (inference). A crop that
-differed between the two would be a silent train/inference distribution
-mismatch -- the model would be evaluated on inputs it never trained on, and
-the metrics would not describe the deployed behavior. Same reasoning that
-keeps optic_disc.extract_color_features() shared between the disc/cup U-Net's
-training and inference paths.
-
-Note the crop is deliberately WIDER than the disc itself
-(optic_disc._DISC_ROI_CROP_MULTIPLE = 3.0 disc diameters, the same ROI Stage
-6.2 segments in): glaucoma's signs include peripapillary RNFL defects and
-disc hemorrhages just outside the rim, so a crop tight to the disc margin
-would cut away real signal. Three disc diameters keeps the disc dominant in
-frame while retaining the peripapillary ring.
+This is the SINGLE shared crop definition, imported by both glaucoma_dataset.py
+(training) and glaucoma_infer.py (inference) -- if the two diverge, the model is
+evaluated on inputs it never trained on and the metrics lie. The crop is
+deliberately 3 disc diameters wide (optic_disc._DISC_ROI_CROP_MULTIPLE), not tight
+to the rim: peripapillary RNFL defects and disc hemorrhages just outside the rim
+are real glaucoma signs.
 """
 
 import numpy as np

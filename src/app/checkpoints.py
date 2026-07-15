@@ -39,8 +39,8 @@ DEFAULT_TAG = "v1.2.0"
 # Matches src/detection/infer.py, glaucoma_infer.py, amd_infer.py, and
 # src/segmentation/vessel_infer.py, optic_disc_infer.py's DEFAULT_WEIGHTS_PATH
 # constants — the only five files a deployed app needs to load.
-# optic_disc_unet.provisional_domainsplit.pth (kept for comparison, see
-# ROADMAP.md's Phase 6) is intentionally excluded: nothing in src/ loads it.
+# optic_disc_unet.provisional_domainsplit.pth (kept locally for comparison) is
+# intentionally excluded: nothing in src/ loads it.
 CHECKPOINT_FILES = [
     "dr_efficientnet_b0.pth",
     "glaucoma_efficientnet_b0.pth",

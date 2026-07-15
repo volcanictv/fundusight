@@ -1,32 +1,19 @@
-"""Phase 6 (Stage 6.0): dataset for the coarse full-frame disc locator.
+"""Stage 6.0: dataset for the coarse full-frame disc locator.
 
-Reuses REFUGE2's pooled/re-stratified pairs (optic_disc_dataset.
-build_pooled_pairs / split_pooled_pairs) -- same images, same domain-balanced
-split discipline, same seed -- so the locator and the disc/cup U-Net are
-trained on consistent data and neither leaks the other's test images.
+Reuses REFUGE2's pooled/re-stratified pairs (optic_disc_dataset.build_pooled_pairs /
+split_pooled_pairs, same seed) so the locator and the disc/cup U-Net train on
+consistent data and neither leaks the other's test images. The target differs: this
+yields the disc bounding box ([x, y, w, h] as frame fractions) read off the same
+ground-truth mask as geometry, so no extra annotation is needed.
 
-The difference is the TARGET. OpticDiscDataset yields a per-pixel class map
-inside an ONH crop; this yields four numbers for the WHOLE frame: the disc's
-bounding box as [x_center, y_center, width, height], each a fraction of the
-frame. Deriving it from the same ground-truth mask means no extra annotation
-is needed -- the label is already there, it just has to be read as geometry
-instead of as pixels.
-
-THE DECOY AUGMENTATION IS THE POINT
------------------------------------
-A locator trained on clean REFUGE2 frames alone would learn "the disc is the
-bright roundish thing", which is precisely the heuristic that fails on the
-pathological images this model exists to rescue -- it would inherit the
-classical localizer's bug rather than correct it. REFUGE2 is a glaucoma set;
-it is thin on the massive hemorrhages and confluent exudate of a BRVO or
-severe DR frame, so that failure would never show up in training loss.
-
-_add_synthetic_decoys() therefore paints bright, avascular blobs into the
-frame at random locations away from the true disc, at sizes and intensities
-that can outshine it. The box does not move. The model is thus explicitly
-supervised to ignore a bright blob that has no vessels converging on it and
-to keep pointing at the real disc -- forcing it onto the macro cues (vessel
-arcade convergence, FOV geometry) rather than local brightness.
+The synthetic-decoy augmentation is the point. On clean REFUGE2 alone the locator
+would just learn "the disc is the bright roundish thing" -- the exact heuristic that
+fails on the pathological frames it exists to rescue, and REFUGE2 (a glaucoma set)
+is too thin on hemorrhage/exudate for that failure to show up in training loss.
+_add_synthetic_decoys() paints bright avascular blobs away from the true disc, at
+sizes/intensities that can outshine it, without moving the box -- supervising the
+model to ignore brightness that has no vessels converging on it and rely on macro
+cues (arcade convergence, FOV geometry) instead.
 """
 
 import cv2

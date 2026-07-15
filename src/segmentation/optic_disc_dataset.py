@@ -1,36 +1,19 @@
-"""Phase 6 (Stage 6.2): dataset loading for REFUGE2.
-
-REFUGE2 ships its own official train/val/test split -- 400 labeled images
-each, confirmed by directory audit:
+"""Stage 6.2: dataset loading for REFUGE2 (disc/cup segmentation).
 
     REFUGE2/{train,val,test}/images/*.jpg
-    REFUGE2/{train,val,test}/mask/*.{bmp,png}   -- train/test use .bmp, val uses .png
+    REFUGE2/{train,val,test}/mask/*.{bmp,png}   -- train/test .bmp, val .png
 
-Masks use pixel values {0=cup, 128=disc rim, 255=background} (confirmed via
-np.unique on real files), remapped here to class indices
-{0=background, 1=disc rim, 2=cup} -- background last in the raw pixel
-value's brightness ordering but first as a class index, matching
-optic_disc_model.py's OUT_CHANNELS ordering and
-optic_disc_loss.py/optic_disc_infer.py's assumption that class 0 is
-background.
+Masks use pixel values {0=cup, 128=disc rim, 255=background}, remapped here to
+class indices {0=background, 1=disc rim, 2=cup} to match optic_disc_model.py's
+channel ordering and the loss/infer assumption that class 0 is background.
 
-IMPORTANT: REFUGE2's official split turned out NOT to be a random sample of
-one population -- direct image inspection (no metadata file exists) found
-each split is a single UNIFORM resolution with zero mixing (train
-2056x2124, val 1940x1940, test 1634x1634, 400/400 images each) and
-dramatically different mean color statistics (e.g. mean blue channel:
-train 21.4, val 14.9, test 56.5). Each split is effectively one camera/site
-domain, not a mixture. This is a real three-way domain shift, not a
-composition imbalance -- it explains why the baseline model itself already
-scored very differently on val vs. test, and why two independent, correctly
-cross-validated post-hoc calibration attempts (see
-scripts/calibrate_optic_disc_thresholds.py) both failed to transfer from
-val's domain to test's domain. build_pooled_pairs()/split_pooled_pairs()
-below pool all three original folders and re-split with stratification by
-ORIGINAL folder, so every new split gets a proportional mix of all three
-camera domains instead of being a single one -- optic_disc_train.py uses
-these, not build_pairs(), as of the retrain that's meant to follow this
-change (see ROADMAP.md).
+REFUGE2's official split is NOT a random sample: each folder is effectively one
+camera domain (uniform resolution + very different colour stats), so a model
+trained on it scores wildly differently val vs test and post-hoc calibration
+won't transfer. build_pooled_pairs() / split_pooled_pairs() below pool all three
+folders and re-split stratified by original folder so every split mixes all three
+domains -- optic_disc_train.py uses these, not build_pairs(). Full write-up and
+numbers in DEEP_DIVE.md / README.
 """
 
 import glob

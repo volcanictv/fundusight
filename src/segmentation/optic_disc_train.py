@@ -1,34 +1,17 @@
-"""Phase 6 (Stage 6.2): train the optic disc/cup segmentation U-Net.
-
-Trains OpticDiscUNet with a combined CrossEntropy + multi-class Dice loss.
-Run with (from the project root):
+"""Stage 6.2: train the optic disc/cup segmentation U-Net.
 
     .venv\\Scripts\\python.exe src\\segmentation\\optic_disc_train.py --epochs 80
 
-Saves the best checkpoint (by validation mean Dice over the disc-rim and
-cup classes -- background excluded, see evaluate()) to --output, then
-evaluates once on the held-out test split, which is never touched during
-training or model selection -- same discipline as
-src/detection/train.py and src/segmentation/vessel_train.py.
+CrossEntropy + multi-class Dice loss. Saves the best checkpoint by validation mean
+Dice over the rim and cup classes (background excluded) -- not by loss -- then
+evaluates once on the held-out test split.
 
-Trains on a POOLED, re-stratified split (optic_disc_dataset.
-build_pooled_pairs()/split_pooled_pairs()), NOT REFUGE2's own official
-train/val/test folders -- see optic_disc_dataset.py's module docstring for
-why: REFUGE2's official split turned out to be a three-way camera/domain
-split (each folder is a single uniform resolution/color-profile source,
-confirmed by direct image inspection), not a random sample of one
-population. Training on it as-is and evaluating on its own val/test left
-the model's validation performance not predictive of test performance,
-which broke post-hoc calibration in Phase 6's investigation (see
-ROADMAP.md and scripts/calibrate_optic_disc_thresholds.py). Pooling and
-re-splitting with stratification by original folder mixes all three
-domains into each new split instead.
-
-Don't copy vessel_train.py's 150-epoch default here: that compensated for
-a tiny ~46-image pooled training set where each "epoch" was a single random
-patch per image. Here an epoch is a real pass over ~840 pooled training
-images, so a much lower epoch count (80, with ReduceLROnPlateau backing off
-the learning rate as needed) is the appropriate default.
+Trains on the POOLED, re-stratified split (optic_disc_dataset.build_pooled_pairs /
+split_pooled_pairs), NOT REFUGE2's official folders, which are a three-way
+camera/domain split rather than one population (see optic_disc_dataset.py and
+DEEP_DIVE.md). Note the 80-epoch default: don't copy vessel_train.py's 150 -- that
+compensated for a tiny ~46-image set with one random patch per epoch; here an epoch
+is a real pass over ~840 images, with ReduceLROnPlateau backing off the LR.
 """
 
 import argparse

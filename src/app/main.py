@@ -1,24 +1,18 @@
-"""Streamlit dashboard: ties every pipeline stage together (upload or demo
-mode -> quality -> preprocessing preview -> DR/glaucoma/AMD detection with
-Grad-CAM -> vessel biomarkers -> optic disc/cup/CDR -> recommendation
-summary -> PDF download).
+"""Streamlit dashboard: ties every pipeline stage together (upload or demo mode ->
+quality -> preprocessing -> DR/glaucoma/AMD detection with Grad-CAM -> vessel
+biomarkers -> optic disc/cup/CDR -> recommendation -> PDF download).
 
-The results area is a dense multi-column grid (Overview / Disease
-Screening / Biomarkers rows, see _ROWS below), not stacked full-width
-sections. Each stage gets its own st.empty() placeholder that fills in
-place as report/pipeline.py's run_pipeline() finishes it (see on_stage
-below and app/progress.py's ProgressBanner), so the page doesn't sit
-behind one opaque spinner.
-
-Run with (from the repo root, matching this project's Windows venv
-convention -- see README):
+The results area is a dense multi-column grid (Overview / Disease Screening /
+Biomarkers rows, see _ROWS below), not stacked full-width sections. Each stage gets
+its own st.empty() placeholder that fills in place as run_pipeline() finishes it
+(see on_stage below and app/progress.py), so the page doesn't sit behind one opaque
+spinner.
 
     .venv\\Scripts\\python.exe -m streamlit run src/app/main.py
 
-Everything here only reads the documented dict/dataclass keys the pipeline
-modules expose (see report/pipeline.py, report/content.py) -- never a
-specific accuracy number or checkpoint detail, so a future retrained
-checkpoint (see ROADMAP.md's Phase 6 note) needs no changes on this page.
+Only reads the documented dict/dataclass keys the pipeline exposes (report/pipeline.py,
+report/content.py) -- never a specific accuracy number or checkpoint detail, so a
+retrained checkpoint needs no changes here.
 """
 
 import hashlib
@@ -295,8 +289,7 @@ def render_optic_disc_section(optic_disc_result: dict, working_image: np.ndarray
     if not optic_disc_result["disc_found"] or optic_disc_result["disc_diameter_px"] == 0:
         # disc_found only reflects classical localization succeeding --
         # segmentation can independently come back empty on out-of-domain
-        # input (see ROADMAP.md's Phase 6 note), which disc_found alone
-        # wouldn't catch.
+        # input, which disc_found alone wouldn't catch.
         st.warning("Optic disc could not be confidently segmented in this image — cup/disc measurements above are not meaningful.")
     elif not optic_disc_result["disc_confident"]:
         # The disc WAS located and segmented -- it just doesn't look like a

@@ -3,8 +3,8 @@
 Reads REFUGE2/glaucoma_labels_merged.csv (built by
 scripts/build_glaucoma_labels.py, which merges REFUGE2's own
 Refuge2_test.csv with SMDG-19's REFUGE1-train/REFUGE1-val rows — see that
-script's docstring and ROADMAP.md's Phase 7 section for how the labels were
-assembled and what conflicts were resolved).
+script's docstring for how the labels were assembled and what conflicts were
+resolved).
 
 Mirrors src/segmentation/optic_disc_dataset.py's pooled/stratified-split
 pattern: REFUGE2's train/val/test folders are three different camera

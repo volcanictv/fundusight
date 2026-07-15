@@ -1,40 +1,27 @@
-"""Dashboard visual theme: "Clinical Liquid Glass" -- adopted from a
-Stitch-generated reference mockup (`Front-End Template/stitch_visiondx_
-retinal_screening_dashboard/`: DESIGN.md + code.html + screen.png).
+"""Dashboard visual theme: "Clinical Liquid Glass".
 
-- Indigo (#3525CD, "primary") is the single primary accent -- buttons,
-  links, the "normal/no finding" semantic, focus rings. Sky-blue secondary
-  (#0EA5E9) covers neutral/informational accents. Burnt-orange tertiary
-  (#A44100) is "a finding is present" / attention, used sparingly.
-- Hanken Grotesk (headlines) + Inter (body) + Geist (small mono-ish labels/
-  data) -- matches the reference's actual Google Fonts import exactly
-  (its DESIGN.md prose says Manrope/JetBrains Mono, but its own code.html
-  loads Hanken Grotesk/Inter/Geist; code.html is the literal rendered
-  artifact behind screen.png, so it's ground truth here, not the prose doc).
-- Frost-white background (#F7F9FB) with glass-card surfaces: translucent
-  white + blur, a soft black hairline border (rgba(0,0,0,0.08), the
-  reference's own `border-luminous` token) and a large, very soft ambient
-  shadow ("Light Diffusion" in the reference's own DESIGN.md).
-- Material Symbols Outlined icons (settings, cloud_upload, rocket_launch,
-  etc.) throughout, matching the reference's header/dropzone/buttons.
+Injects scoped CSS -- Streamlit's config.toml theme only covers a few colors, so
+this targets Streamlit's `data-testid` attributes (the stable styling hook across
+versions) rather than its generated class names.
 
-Streamlit has no first-class theming API expressive enough for this (its
-config.toml theme only covers a handful of colors), so this injects scoped
-CSS instead -- targeting Streamlit's `data-testid` attributes rather than
-its generated class names, since those are the one part of its DOM that's
-meant to be a stable styling hook across versions.
+- Indigo (#3525CD) is the single primary accent (buttons, links, focus rings, the
+  "normal/no finding" semantic); sky-blue (#0EA5E9) for neutral/informational;
+  burnt-orange (#A44100) for "a finding is present", used sparingly.
+- Hanken Grotesk (headlines) + Inter (body) + Geist (mono-ish data labels).
+- Frost-white background (#F7F9FB) with translucent blurred glass-card surfaces, a
+  soft hairline border, and a large soft ambient shadow.
+- Material Symbols Outlined icons throughout.
 
-Deliberately NOT applied to report/pdf.py's ReportLab output -- that's a
-separate, print-optimized renderer (ink-conscious, A4) where glass/blur/
-gradient treatments would work against a clean printed page. Both
-renderers still walk the same report/content.py Section list, so they can
-never disagree on *content*, only presentation.
+Deliberately NOT applied to report/pdf.py's ReportLab output -- that's a separate
+print-optimized renderer (A4, ink-conscious) where glass/blur would work against a
+clean printed page. Both renderers walk the same report/content.py Section list, so
+they can never disagree on content, only presentation.
 """
 
 import streamlit as st
 
-# "Clinical Liquid Glass" palette -- see module docstring for where these
-# come from. Named by ROLE (primary/secondary/tertiary), not by hue, so a
+# "Clinical Liquid Glass" palette. Named by ROLE (primary/secondary/tertiary),
+# not by hue, so a
 # future re-hue doesn't leave a misleading name behind the way the old
 # "_TEAL"/"_COPPER" constants would have here.
 _PRIMARY = "#3525CD"  # indigo -- single primary accent: buttons, links, progress fill, "normal" status
@@ -53,10 +40,8 @@ _TRACK = "rgba(0, 0, 0, 0.06)"
 _CSS = f"""
 <style>
 /* Hanken Grotesk (headlines) + Inter (body) + Geist (small/mono-ish
-   labels and data) -- matching the Stitch reference's own Google Fonts
-   import exactly (see module docstring for why code.html, not DESIGN.md's
-   prose, is ground truth here). Degrades to system fonts silently if the
-   network is blocked, no broken layout. */
+   labels and data). Degrades to system fonts silently if the network is
+   blocked, no broken layout. */
 @import url('https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Geist:wght@400;500;600&display=swap');
 
 /* Material Symbols Outlined needs all FOUR variable-font axes (opsz,

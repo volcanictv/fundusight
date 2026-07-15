@@ -1,31 +1,19 @@
-"""Phase 5: Vessel Segmentation.
+"""Vessel segmentation (classical CV).
 
-Classical CV module that extracts the retinal vessel tree from a fundus
-photo and computes four biomarkers from it: vessel density, branch point
-count, tortuosity, and average width. Independent of the DR detection model
-in `src/detection/` — this is a separate, parallel branch of the pipeline.
+Extracts the retinal vessel tree from a fundus photo and computes four biomarkers
+(vessel density, branch-point count, tortuosity, average width). Torch-free on
+purpose: the classical baseline (compute_biomarkers / segment_vessels via
+compute_frangi_response + hysteresis threshold) pulls in no trained model, so tests
+and the demo never import torch. The hybrid classical+learned path -- where the
+*unthresholded* Frangi response feeds a trained U-Net -- lives in vessel_infer.py,
+which imports from here.
 
-This module stays classical and torch-free on purpose: `compute_biomarkers()`
-and `segment_vessels()` here only ever produce a mask via
-`compute_frangi_response()` + a hysteresis threshold, no trained model
-involved, so anything that only needs the classical baseline (tests, the
-demo script) never pulls in torch. The hybrid classical+learned pipeline —
-where `compute_frangi_response()`'s *unthresholded* Frangi response is fed
-as an input channel to a trained U-Net instead of being thresholded
-directly — lives in `vessel_infer.py`, which imports from here rather than
-the other way around.
-
-Pipeline: resize to a canonical working resolution -> green channel ->
-CLAHE -> multi-scale Frangi vesselness filter -> hysteresis threshold ->
-small-object removal -> skeletonize.
-
-APTOS images arrive at inconsistent native resolutions (e.g. 1736x2416 vs
-1050x1050), and Frangi's sigmas are absolute pixel scales — the same sigma
-range corresponds to a different physical vessel width depending on which
-photo came in. `compute_frangi_response()` resizes every input to
-`VESSEL_WORKING_WIDTH` internally so the sigma range (and everything
-downstream, classical or hybrid) means the same thing across every image,
-not just for well-behaved callers.
+Pipeline: resize to a canonical working width -> green channel -> CLAHE ->
+multi-scale Frangi -> hysteresis threshold -> small-object removal -> skeletonize.
+The resize is load-bearing: Frangi sigmas are absolute pixel scales, but inputs
+arrive at wildly different native resolutions, so compute_frangi_response() resizes
+every image to VESSEL_WORKING_WIDTH first -- otherwise the sigma range means a
+different physical vessel width per photo (see README finding #2).
 """
 
 import cv2

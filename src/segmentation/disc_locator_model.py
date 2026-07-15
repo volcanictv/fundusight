@@ -1,88 +1,30 @@
-"""Phase 6 (Stage 6.0): coarse full-frame optic disc localizer.
+"""Stage 6.0: coarse full-frame optic disc localizer.
 
-A small CNN that takes a DOWNSCALED WHOLE fundus photo and regresses the
-optic disc's bounding box in full-frame coordinates. It exists to give
-Stage 6.1's classical brightness+convergence search a second, independent
-opinion -- specifically one that can still be right on the images where the
-classical search lands on a hemorrhage or a specular reflection.
+A small CNN that regresses the disc's bounding box ([x, y, w, h] as fractions of
+the frame) from a downscaled whole fundus photo. It's a second, independent
+opinion for Stage 6.1's classical search, for the images where that search locks
+onto a hemorrhage or a reflection.
 
-WHY THIS IS A SEPARATE MODEL AND NOT A HEAD ON OpticDiscUNet
-------------------------------------------------------------
-The tempting design is to bolt a bounding-box regression head onto
-OpticDiscUNet's bottleneck and get localization "for free" as a multi-task
-output. That design cannot work, for a reason worth stating plainly so it
-isn't re-proposed:
-
-OpticDiscUNet only ever sees a 512x512 ONH CROP that Stage 6.1 already
-produced. Its bbox head would therefore only ever learn "where is the disc
-inside a crop that already contains the disc" -- and at inference, on the
-images that matter, Stage 6.1's crop DOESN'T contain the disc (it contains
-a hemorrhage). The disc simply is not in the tensor, so no head reading that
-tensor can point at it. Running such a head on a full frame instead would be
-out-of-distribution inference: this repo has already been bitten by exactly
-that (the glaucoma classifier trained on full images and fed ONH crops
-returned confident, meaningless probabilities rather than erroring -- see
-src/detection/onh_crop.py). A confident bbox pointing at
-nothing is strictly worse than an honest `confident=False`, because it
-converts a caught failure back into a silent one.
-
-So the arbitration model has to be trained on the same kind of image it will
-be asked about: whole frames. That is what this is.
-
-DESIGN
-------
-Deliberately small and low-resolution (_LOCATOR_INPUT_SIZE, default 256).
-The task is "which part of the frame is the disc in", which needs macro
-spatial layout -- the vessel arcade shape, the disc's position relative to
-the FOV -- not fine texture. Low resolution is a feature, not a compromise:
-it makes the network physically unable to key on a small bright lesion's
-local texture, which is the failure mode being defended against, and it
-keeps the model cheap enough to run on CPU inside the deployed app.
-
-Outputs 4 numbers: [x_center, y_center, width, height], all as FRACTIONS of
-the full frame ([0, 1]), so the prediction is resolution independent and can
-be mapped onto any input photo's native size.
-
-WHY THE POSITION HEAD IS A SOFT-ARGMAX AND NOT GAP -> MLP
----------------------------------------------------------
-The obvious head -- global average pooling followed by an MLP that emits four
-numbers -- was tried first and FAILED, in an instructive way: validation hit
-rate collapsed (0.31 -> 0.017 -> 0.011 over three epochs) while the training
-loss kept falling. The model was minimising the regression loss by predicting
-a constant, roughly the mean disc position over the dataset, and ignoring the
-image entirely.
-
-That is not a tuning problem, it is the architecture. GAP averages every
-spatial cell into one vector, which makes it (by construction) almost
-translation-invariant -- it deliberately throws away WHERE a feature fired and
-keeps only WHETHER it fired. Asking the resulting vector to report a
-coordinate is asking it for the one thing it was designed to discard; the only
-positional signal left is a faint border/padding artifact, so the optimiser
-sensibly gives up and regresses to the mean.
-
-The fix is to keep position in the spatial domain end to end:
-  * POSITION is read out with a spatial softmax over a predicted 1-channel
-    heatmap, then a soft-argmax (the expectation of the pixel coordinate under
-    that distribution). This is the standard differentiable keypoint-
-    localization readout, and it cannot regress to the mean unless the heatmap
-    itself is flat.
-  * SIZE (width/height) still uses GAP -> MLP, and that IS the right tool for
-    it -- how big the disc is genuinely does not depend on where it is, so a
-    translation-invariant pooled descriptor is exactly what you want.
-
-Use GAP for "what/how much", never for "where".
+Two non-obvious design choices, both from a failed first attempt (full write-up
+in DEEP_DIVE.md, "Stage 6.0"): it's a separate model rather than a bbox head on
+OpticDiscUNet (that U-Net only sees an ONH crop which, on the failing images,
+doesn't contain the disc -- so a head reading it can't point at the disc), and
+position is read out via soft-argmax over a heatmap rather than GAP->MLP (GAP is
+translation-invariant and collapses to predicting the mean disc position; size
+still uses GAP, where that invariance is what you want).
 """
 
 import torch
 import torch.nn as nn
 
 # Side length the full frame is squashed to before the network sees it. Square
-# (not aspect-preserving) on purpose: the target bbox is expressed in relative
-# [0, 1] coordinates, so an anisotropic resize maps exactly onto it, and the
-# network never has to reason about letterbox padding.
+# (not aspect-preserving) on purpose: the target bbox is in relative [0, 1]
+# coords, so an anisotropic resize maps straight onto it. Kept deliberately low
+# so the net can't key on a lesion's fine local texture -- macro layout (arcade
+# shape, disc position in the FOV) is all the task needs.
 LOCATOR_INPUT_SIZE = 256
 
-IN_CHANNELS = 3  # plain BGR->RGB; see module docstring on why no fine texture
+IN_CHANNELS = 3  # plain BGR->RGB
 OUT_VALUES = 4  # [x_center, y_center, width, height], relative to the frame
 
 
