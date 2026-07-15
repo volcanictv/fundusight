@@ -1,90 +1,18 @@
-# Core
-# NOTE: pinned to the explicit +cpu build, from PyTorch's own CPU-only wheel
-# index, not the bare "torch==2.11.0" this file used to have. Plain PyPI's
-# default torch wheel is CUDA-bundled (confirmed live: a fresh Streamlit
-# Community Cloud deploy resolved unpinned "torch==2.11.0" to torch+cu130,
-# pulling in a full nvidia-cublas/cudnn/nvtx/etc. stack on a container with
-# no GPU -- CUDA runtime init/device probing with no actual driver present
-# is a well-documented native segfault source, and matches this project's
-# exact incident: the deployed app segfaulted specifically after torch
-# finished importing, with import itself taking 10-30s -- much longer than
-# a CPU-only wheel needs, consistent with CUDA driver-stub loading). The
-# HOW the +cpu wheels are sourced matters as much as the pin itself, and this
-# is the SECOND live incident on this line -- do not "simplify" it back to
-# `--extra-index-url`:
-#
-#   Streamlit Community Cloud switched its installer from pip to `uv`. uv
-#   defaults to a FIRST-INDEX-WINS strategy: an --extra-index-url does not just
-#   add wheels, it CLAIMS PACKAGE NAMES. PyTorch's index mirrors numpy, tqdm and
-#   others, so uv resolved `numpy` against download.pytorch.org (which carries
-#   only up to 2.4.4), never looked at PyPI for 2.5.1, and the whole deploy died
-#   with "no solution found ... numpy==2.5.1". Un-pinning numpy just moves the
-#   failure to tqdm -- it is whack-a-mole, not a fix. The flag that would fix it
-#   (`--index-strategy unsafe-best-match`) is rejected by BOTH pip and uv when
-#   placed in a requirements file, so it is not an option here either.
-#
-#   `--find-links` is the fix: it supplies WHEELS without claiming package
-#   names, so torch/torchvision resolve to the +cpu builds while numpy, tqdm and
-#   everything else still come from PyPI. Verified against both resolvers before
-#   committing: uv (--python-platform linux, py3.12 and 3.13) and pip (win_amd64)
-#   both resolve torch==2.11.0+cpu / torchvision==0.26.0+cpu with ZERO nvidia-*
-#   packages in the resolution -- which is the property that actually prevents
-#   the segfault, so check THAT (not just the pin) if you touch this again.
-#
-# For local GPU training this flips the usual order: this file installs the CPU
-# build, so install requirements.txt FIRST, then install the CUDA build OVER it:
-#   pip install -r requirements.txt
-#   pip install torch==2.11.0+cu128 torchvision==0.26.0+cu128 --index-url https://download.pytorch.org/whl/cu128
-# Re-running `pip install -r requirements.txt` reverts to the CPU build (the pin
-# is exact, not just the public version), so do that reinstall last, right
-# before training -- and before merging to master.
 --find-links https://download.pytorch.org/whl/cpu/torch/
 --find-links https://download.pytorch.org/whl/cpu/torchvision/
 torch==2.11.0+cpu
 torchvision==0.26.0+cpu
 numpy==2.4.6
 pandas==3.0.3
-openpyxl==3.1.5  # lets pandas read .xlsx (e.g. ADAM's Fovea_location.xlsx)
-
-# Medical imaging utilities
+openpyxl==3.1.5
 monai==1.6.0
-
-# Classical CV
-# Plain opencv-python, not headless: grad-cam (below) hard-requires
-# opencv-python by name in its own package metadata, so pinning
-# opencv-python-headless here doesn't remove it from the install -- pip
-# installs both, and they collide over the same cv2/ package directory.
-# The GUI build's libGL.so.1 dependency (missing on minimal deployment
-# containers, e.g. Streamlit Community Cloud) is supplied instead via
-# packages.txt at the repo root, which installs libgl1/libglib2.0-0t64 via
-# apt -- packages.txt itself must stay comment-free: unlike this file,
-# Streamlit Cloud's packages.txt installer doesn't strip '#' lines and
-# instead tries to apt-get install every word in them literally. The t64
-# suffix matters: Streamlit Cloud's container mixes bullseye-security and
-# trixie apt sources, and trixie renamed libglib2.0-0 to libglib2.0-0t64
-# (the 64-bit time_t transition) -- the old name resolves to a bullseye
-# build that depends on libffi7, which isn't installable from trixie.
 opencv-python==5.0.0.93
 scikit-image==0.26.0
-
-# Explainability
 grad-cam==1.5.5
-
-# Metrics (quadratic weighted kappa, AUC)
 scikit-learn==1.9.0
-
-# App / viz
 streamlit==1.59.1
 plotly==6.8.0
-
-# Reporting
 reportlab==5.0.0
-
-# Dev
 pytest==9.1.1
 tqdm==4.68.4
-
-# Deployment: fetches trained checkpoints from GitHub Releases at runtime
-# (see fetch_checkpoints.py / README's "Deployment" section — checkpoints are
-# gitignored and never committed, so a fresh deploy has none locally).
 requests==2.32.3
